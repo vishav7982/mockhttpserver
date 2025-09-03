@@ -542,3 +542,76 @@ func TestMockServer_MaxBodySize(t *testing.T) {
 		t.Errorf("expected status 400 for large body, got %d", resp.StatusCode)
 	}
 }
+
+// TestMockServer_CustomUnmatchedResponder tests custom callback for unmatched requests.
+func TestMockServer_CustomUnmatchedResponder(t *testing.T) {
+	ms := NewMockServer().WithUnmatchedResponder(
+		func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprintf(w, `{"error":"not found","method":"%s"}`, req.Method)
+		},
+	)
+	defer ms.Close()
+
+	resp, err := http.Get(ms.URL() + "/does-not-exist")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+
+	if resp.StatusCode != 404 {
+		t.Errorf("expected 404 from custom unmatched responder, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	expected := `{"error":"not found","method":"GET"}`
+	if string(body) != expected {
+		t.Errorf("expected body %q, got %q", expected, string(body))
+	}
+}
+
+// TestMockServer_RequestAndResponseFromFile tests both request and response loaded from files.
+func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	exp, err := Expect("POST", "/login").
+		WithRequestBodyFromFile("testdata/sample-request.json")
+	if err != nil {
+		t.Fatalf("failed to create expectation: %v", err)
+	}
+
+	exp, err = exp.AndRespondFromFile("testdata/sample-response.json", 200)
+	if err != nil {
+		t.Fatalf("failed to attach response: %v", err)
+	}
+
+	ms.AddExpectation(exp)
+
+	// Load request from file
+	reqJSON, err := os.ReadFile("testdata/sample-request.json")
+	if err != nil {
+		t.Fatalf("failed to read request file: %v", err)
+	}
+
+	resp, err := http.Post(ms.URL()+"/login", "application/json", strings.NewReader(string(reqJSON)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	got, _ := io.ReadAll(resp.Body)
+	want, err := os.ReadFile("testdata/sample-response.json")
+	if err != nil {
+		t.Fatalf("failed to read response file: %v", err)
+	}
+
+	if string(got) != string(want) {
+		t.Errorf("response mismatch:\nwant: %s\ngot:  %s", string(want), string(got))
+	}
+}

@@ -21,31 +21,34 @@ type UnmatchedRequest struct {
 
 // Config holds configuration options for MockServer
 type Config struct {
-	UnmatchedStatusCode int   // Status code for unmatched requests (default: 418)
-	LogUnmatched        bool  // Whether to log unmatched requests (default: true)
-	MaxBodySize         int64 // Maximum request body size in bytes (default: 10MB)
-	VerboseLogging      bool  // Enable verbose request/response logging (default: false)
+	UnmatchedStatusCode    int    // Status code for unmatched requests (default: 418)
+	UnmatchedStatusMessage string // Status message for unmatched requests (default: "Unmatched Request")
+	LogUnmatched           bool   // Whether to log unmatched requests (default: true)
+	MaxBodySize            int64  // Maximum request body size in bytes (default: 10MB)
+	VerboseLogging         bool   // Enable verbose request/response logging (default: false)
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() Config {
 	return Config{
-		UnmatchedStatusCode: http.StatusTeapot,
-		LogUnmatched:        true,
-		MaxBodySize:         10 << 20, // 10MB
-		VerboseLogging:      false,
+		UnmatchedStatusCode:    http.StatusTeapot,
+		UnmatchedStatusMessage: "Unmatched Request",
+		LogUnmatched:           true,
+		MaxBodySize:            10 << 20, // 10MB
+		VerboseLogging:         false,
 	}
 }
 
 // MockServer represents a lightweight HTTP mock server that can
 // be used to simulate responses for testing HTTP clients.
 type MockServer struct {
-	server            *httptest.Server
-	expectations      []*Expectation
-	unmatchedRequests []UnmatchedRequest
-	mu                sync.RWMutex
-	logger            *log.Logger
-	config            Config
+	server             *httptest.Server
+	expectations       []*Expectation
+	unmatchedRequests  []UnmatchedRequest
+	mu                 sync.RWMutex
+	logger             *log.Logger
+	config             Config
+	unmatchedResponder func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest)
 }
 
 // NewMockServer initializes a new MockServer with default configuration and logger.
@@ -68,6 +71,17 @@ func (m *MockServer) WithLogger(logger *log.Logger) *MockServer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logger = logger
+	return m
+}
+
+// WithUnmatchedResponder allows configuring a custom handler for unmatched requests.
+// If set, this callback is invoked instead of the default unmatched response.
+func (m *MockServer) WithUnmatchedResponder(
+	handler func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest),
+) *MockServer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unmatchedResponder = handler
 	return m
 }
 
@@ -147,8 +161,8 @@ func (m *MockServer) VerifyExpectations() error {
 }
 
 // handler processes incoming HTTP requests and returns the configured mock response.
-// It supports matching on method, path, query parameters, headers, and request body.
-// If no expectation matches, it responds with the configured unmatched status code.
+// If no expectation matches, it responds with either a custom unmatchedResponder
+// (if provided) or the default unmatched status code.
 func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	// Read request body with size limit
 	var body []byte
@@ -159,7 +173,7 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxBodySize)
 		}
 		body, err = io.ReadAll(r.Body)
-		r.Body.Close() // Close immediately after reading
+		_ = r.Body.Close()
 		if err != nil {
 			m.logger.Printf("Failed to read request body: %v", err)
 			http.Error(w, "failed to read request body", http.StatusBadRequest)
@@ -178,15 +192,12 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 	// Iterate over all expectations to find a match
 	for _, exp := range m.expectations {
 		if exp.matches(r, body) {
-			// Increment call count
 			exp.callCount++
 
-			// Set response headers if any
 			for key, value := range exp.responseHeaders {
 				w.Header().Set(key, value)
 			}
 
-			// Write response
 			w.WriteHeader(exp.ResCode)
 			if _, err := w.Write([]byte(exp.ResBody)); err != nil {
 				m.logger.Printf("Failed to write response: %v", err)
@@ -208,15 +219,17 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 	m.unmatchedRequests = append(m.unmatchedRequests, unmatched)
-
-	// Log unexpected requests for debugging
 	if m.config.LogUnmatched {
 		m.logger.Printf("Unexpected Request:\nMethod=%s\nURI=%s\nHeaders=%+v\nBody=%s\n",
 			r.Method, r.URL.RequestURI(), r.Header, string(body))
 	}
-
-	// Respond with configured unmatched status code
-	http.Error(w, "Unexpected request", m.config.UnmatchedStatusCode)
+	if m.unmatchedResponder != nil {
+		// Use custom callback
+		m.unmatchedResponder(w, r, unmatched)
+		return
+	}
+	// Default response
+	http.Error(w, m.config.UnmatchedStatusMessage, m.config.UnmatchedStatusCode)
 }
 
 // Client returns an *http.Client that uses this mock server.
@@ -237,7 +250,6 @@ type mockRoundTripper struct {
 }
 
 func (rt *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Replace the request URL with the mock server URL
 	req.URL.Scheme = "http"
 	req.URL.Host = rt.server.server.Listener.Addr().String()
 	return http.DefaultTransport.RoundTrip(req)
