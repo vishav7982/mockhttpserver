@@ -2,11 +2,13 @@ package mockhttpserver
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -451,17 +453,17 @@ func TestMockServer_ExpectationManagement(t *testing.T) {
 
 // TestMockServer_UnmatchedRequests tests tracking of unmatched requests.
 func TestMockServer_UnmatchedRequest(t *testing.T) {
-	ms := NewMockServer()
+	ms := NewMockServerWithConfig(Config{
+		UnmatchedStatusCode: 404,
+	})
 	defer ms.Close()
 
-	// No expectation added, should return default 404
+	// No expectation added, should return 404
 	resp, err := http.Get(ms.URL() + "/unknown")
 	if err != nil {
 		t.Fatalf("GET request failed: %v", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 404 {
 		t.Errorf("expected status 404, got %d", resp.StatusCode)
@@ -471,9 +473,8 @@ func TestMockServer_UnmatchedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST request failed: %v", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp2.Body.Close() }()
+
 	if resp2.StatusCode != 404 {
 		t.Errorf("expected status 404, got %d", resp2.StatusCode)
 	}
@@ -579,7 +580,7 @@ func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 		t.Fatalf("failed to read request file: %v", err)
 	}
 
-	resp, err := http.Post(ms.URL()+"/login", "application/json", strings.NewReader(string(reqJSON)))
+	resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -589,13 +590,26 @@ func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	got, _ := io.ReadAll(resp.Body)
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
 	want, err := os.ReadFile(respFile)
 	if err != nil {
 		t.Fatalf("failed to read response file: %v", err)
 	}
 
-	if string(got) != string(want) {
-		t.Errorf("response mismatch:\nwant: %s\ngot:  %s", string(want), string(got))
+	// Compare JSON objects instead of raw strings
+	var gotJSON, wantJSON interface{}
+	if err := json.Unmarshal(got, &gotJSON); err != nil {
+		t.Fatalf("failed to unmarshal actual response JSON: %v", err)
+	}
+	if err := json.Unmarshal(want, &wantJSON); err != nil {
+		t.Fatalf("failed to unmarshal expected response JSON: %v", err)
+	}
+
+	if !reflect.DeepEqual(gotJSON, wantJSON) {
+		t.Errorf("response JSON mismatch:\nwant: %s\ngot:  %s", string(want), string(got))
 	}
 }

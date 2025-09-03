@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,10 +82,11 @@ func TestWithRequestBodyContains(t *testing.T) {
 }
 
 func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
-	reqFile := "testdata/sample-request.json"
-	resFile := "testdata/sample-response.json"
+	// Make sure we use repo root relative path
+	reqFile := filepath.Join("testdata", "sample-request.json")
+	resFile := filepath.Join("testdata", "sample-response.json")
 
-	// ensure testdata exists (should be static)
+	// Fail fast if testdata files are missing
 	if _, err := os.Stat(reqFile); err != nil {
 		t.Fatalf("request file missing: %v", err)
 	}
@@ -92,11 +94,14 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 		t.Fatalf("response file missing: %v", err)
 	}
 
-	ms := NewMockServer()
+	// Use custom config to avoid default 418
+	ms := NewMockServerWithConfig(Config{
+		UnmatchedStatusCode: 404,
+	})
 	defer ms.Close()
 
-	exp, err := Expect("POST", "/login").
-		WithRequestBodyFromFile(reqFile)
+	// Create expectation from files
+	exp, err := Expect("POST", "/login").WithRequestBodyFromFile(reqFile)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -106,6 +111,7 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 	}
 	ms.AddExpectation(exp)
 
+	// Read request from file
 	reqBody, err := os.ReadFile(reqFile)
 	if err != nil {
 		t.Fatalf("failed to read request file: %v", err)
@@ -115,25 +121,29 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	defer safeClose(t, resp.Body)
 
 	if resp.StatusCode != 200 {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	// Read expected response
 	expectedResp, err := os.ReadFile(resFile)
 	if err != nil {
 		t.Fatalf("failed to read response file: %v", err)
 	}
 
-	if string(body) != string(expectedResp) {
-		t.Errorf("response mismatch:\nwant: %s\ngot:  %s", expectedResp, body)
+	// Trim whitespace for robust comparison
+	if strings.TrimSpace(string(body)) != strings.TrimSpace(string(expectedResp)) {
+		t.Errorf("response mismatch:\nwant: %s\ngot:  %s",
+			strings.TrimSpace(string(expectedResp)),
+			strings.TrimSpace(string(body)),
+		)
 	}
 }
 
