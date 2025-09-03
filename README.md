@@ -19,4 +19,5 @@ A lightweight and flexible HTTP mock server for Go, designed to help developers 
 ## Installation
 
 ```bash
-go get github.com/vishav7982/mockserver
+go get github.com/vishav7982/mockhttpserver
+
