@@ -1,10 +1,11 @@
 package mockhttpserver
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,27 +81,59 @@ func TestWithRequestBodyContains(t *testing.T) {
 }
 
 func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
-	tmpdir := t.TempDir()
-	reqFile := filepath.Join(tmpdir, "req.json")
-	resFile := filepath.Join(tmpdir, "res.json")
-	os.WriteFile(reqFile, []byte(`{"k":"v"}`), 0644)
-	os.WriteFile(resFile, []byte(`{"status":"ok"}`), 0644)
+	reqFile := "testdata/sample-request.json"
+	resFile := "testdata/sample-response.json"
 
-	e, err := Expect("POST", "/api").WithRequestBodyFromFile(reqFile)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// ensure testdata exists (should be static)
+	if _, err := os.Stat(reqFile); err != nil {
+		t.Fatalf("request file missing: %v", err)
 	}
-	r, _ := http.NewRequest("POST", "/api", nil)
-	if !e.matches(r, []byte(`{"k":"v"}`)) {
-		t.Errorf("expected file body to match")
+	if _, err := os.Stat(resFile); err != nil {
+		t.Fatalf("response file missing: %v", err)
 	}
 
-	e, err = e.AndRespondFromFile(resFile, 200)
+	ms := NewMockServer()
+	defer ms.Close()
+
+	exp, err := Expect("POST", "/login").
+		WithRequestBodyFromFile(reqFile)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("failed to create expectation: %v", err)
 	}
-	if e.ResBody != `{"status":"ok"}` || e.ResCode != 200 {
-		t.Errorf("unexpected response: %+v", e)
+	exp, err = exp.AndRespondFromFile(resFile, 200)
+	if err != nil {
+		t.Fatalf("failed to set response from file: %v", err)
+	}
+	ms.AddExpectation(exp)
+
+	reqBody, err := os.ReadFile(reqFile)
+	if err != nil {
+		t.Fatalf("failed to read request file: %v", err)
+	}
+
+	resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	expectedResp, err := os.ReadFile(resFile)
+	if err != nil {
+		t.Fatalf("failed to read response file: %v", err)
+	}
+
+	if string(body) != string(expectedResp) {
+		t.Errorf("response mismatch:\nwant: %s\ngot:  %s", expectedResp, body)
 	}
 }
 
@@ -159,7 +192,7 @@ func TestMatchesFailures(t *testing.T) {
 
 	u, _ = url.Parse("/api?id=42")
 	r = &http.Request{Method: "POST", URL: u, Header: http.Header{"X-Test": []string{"1"}}}
-	if e.matches(r, []byte("wrongbody")) {
+	if e.matches(r, []byte("wrong-body")) {
 		t.Errorf("expected mismatch due to body")
 	}
 }

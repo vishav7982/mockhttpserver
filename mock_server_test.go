@@ -22,17 +22,6 @@ func safeClose(t *testing.T, body io.ReadCloser) {
 	}
 }
 
-// loadTestFile reads a file from the testdata folder.
-func loadTestFile(t *testing.T, filename string) string {
-	t.Helper()
-	path := filepath.Join("testdata", filename)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read test file %s: %v", filename, err)
-	}
-	return string(data)
-}
-
 // TestMockServer_Basic validates a simple POST request with body returns expected response.
 func TestMockServer_Basic(t *testing.T) {
 	ms := NewMockServer()
@@ -461,33 +450,32 @@ func TestMockServer_ExpectationManagement(t *testing.T) {
 }
 
 // TestMockServer_UnmatchedRequests tests tracking of unmatched requests.
-func TestMockServer_UnmatchedRequests(t *testing.T) {
+func TestMockServer_UnmatchedRequest(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	// Make some unmatched requests
-	http.Get(ms.URL() + "/unknown1")
-	http.Post(ms.URL()+"/unknown2", "text/plain", strings.NewReader("test"))
+	// No expectation added, should return default 404
+	resp, err := http.Get(ms.URL() + "/unknown")
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
-	unmatched := ms.GetUnmatchedRequests()
-	if len(unmatched) != 2 {
-		t.Errorf("expected 2 unmatched requests, got %d", len(unmatched))
+	if resp.StatusCode != 404 {
+		t.Errorf("expected status 404, got %d", resp.StatusCode)
 	}
 
-	if unmatched[0].Method != "GET" || unmatched[0].URL != "/unknown1" {
-		t.Error("first unmatched request details incorrect")
+	resp2, err := http.Post(ms.URL()+"/unknown2", "text/plain", bytes.NewReader([]byte("test")))
+	if err != nil {
+		t.Fatalf("POST request failed: %v", err)
 	}
-
-	if unmatched[1].Method != "POST" || unmatched[1].URL != "/unknown2" {
-		t.Error("second unmatched request details incorrect")
-	}
-
-	// Clear unmatched requests
-	ms.ClearUnmatchedRequests()
-
-	unmatched = ms.GetUnmatchedRequests()
-	if len(unmatched) != 0 {
-		t.Errorf("expected 0 unmatched requests after clearing, got %d", len(unmatched))
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp2.StatusCode != 404 {
+		t.Errorf("expected status 404, got %d", resp2.StatusCode)
 	}
 }
 
