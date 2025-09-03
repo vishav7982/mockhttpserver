@@ -557,14 +557,16 @@ func TestMockServer_CustomUnmatchedResponder(t *testing.T) {
 func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
+	reqFile := filepath.Join("testdata", "sample-request.json")
+	respFile := filepath.Join("testdata", "sample-response.json")
 
 	exp, err := Expect("POST", "/login").
-		WithRequestBodyFromFile("testdata/sample-request.json")
+		WithRequestBodyFromFile(reqFile)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
 
-	exp, err = exp.AndRespondFromFile("testdata/sample-response.json", 200)
+	exp, err = exp.AndRespondFromFile(respFile, 200)
 	if err != nil {
 		t.Fatalf("failed to attach response: %v", err)
 	}
@@ -572,7 +574,7 @@ func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 	ms.AddExpectation(exp)
 
 	// Load request from file
-	reqJSON, err := os.ReadFile("testdata/sample-request.json")
+	reqJSON, err := os.ReadFile(reqFile)
 	if err != nil {
 		t.Fatalf("failed to read request file: %v", err)
 	}
@@ -588,7 +590,7 @@ func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 	}
 
 	got, _ := io.ReadAll(resp.Body)
-	want, err := os.ReadFile("testdata/sample-response.json")
+	want, err := os.ReadFile(respFile)
 	if err != nil {
 		t.Fatalf("failed to read response file: %v", err)
 	}
