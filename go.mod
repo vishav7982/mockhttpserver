@@ -1,3 +1,3 @@
 module github.com/vishav7982/mockhttpserver
 
-go 1.23.2
+go 1.22
