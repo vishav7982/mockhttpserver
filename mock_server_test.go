@@ -321,25 +321,22 @@ func TestMockServer_ConcurrentRequests(t *testing.T) {
 
 // TestMockServer_ResponseFromFile serves a JSON file as response body.
 func TestMockServer_ResponseFromFile(t *testing.T) {
-	// Create test data directory and file
-	if err := os.MkdirAll("testdata", 0755); err != nil {
-		t.Fatalf("failed to create testdata directory: %v", err)
-	}
+	// Use existing static fixture in testdata/
+	filePath := filepath.Join("testdata", "sample-response.json")
 
-	testResponse := `{"status":"success","data":{"id":123,"name":"test"}}`
-	if err := os.WriteFile("testdata/response.json", []byte(testResponse), 0644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
+	// Read expected body from file
+	want, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read fixture file: %v", err)
 	}
-	defer os.RemoveAll("testdata")
 
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := Expect("GET", "/api").AndRespondFromFile("testdata/response.json", 200)
+	exp, err := Expect("GET", "/api").AndRespondFromFile(filePath, 200)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
-
 	ms.AddExpectation(exp)
 
 	resp, err := http.Get(ms.URL() + "/api")
@@ -349,36 +346,33 @@ func TestMockServer_ResponseFromFile(t *testing.T) {
 	defer safeClose(t, resp.Body)
 
 	got, _ := io.ReadAll(resp.Body)
-	if string(got) != testResponse {
-		t.Errorf("response body mismatch:\nwant: %s\ngot:  %s", testResponse, string(got))
+	if string(got) != string(want) {
+		t.Errorf("response body mismatch:\nwant: %s\ngot:  %s", string(want), string(got))
 	}
 }
 
 // TestMockServer_RequestBodyFromFile uses request body from file.
 func TestMockServer_RequestBodyFromFile(t *testing.T) {
-	// Create test data
-	if err := os.MkdirAll("testdata", 0755); err != nil {
-		t.Fatalf("failed to create testdata directory: %v", err)
-	}
+	// Use existing static fixture in testdata/
+	filePath := filepath.Join("testdata", "sample-request.json")
 
-	testRequest := `{"query":"test","filters":{"active":true}}`
-	if err := os.WriteFile("testdata/request.json", []byte(testRequest), 0644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
+	// Load request body from file
+	testRequest, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read fixture file: %v", err)
 	}
-	defer os.RemoveAll("testdata")
 
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := Expect("POST", "/api").WithRequestBodyFromFile("testdata/request.json")
+	exp, err := Expect("POST", "/api").WithRequestBodyFromFile(filePath)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
-
 	ms.AddExpectation(exp.AndRespondWithString("matched", 200))
 
 	resp, err := http.Post(ms.URL()+"/api", "application/json",
-		bytes.NewReader([]byte(testRequest)))
+		bytes.NewReader(testRequest))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
