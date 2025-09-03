@@ -38,44 +38,33 @@ That’s it — define an expectation, add it to the server, and make requests a
 ### Integration Example 
 ```go
 package main
-
 import (
-    "bytes"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "os"
-    "github.com/vishav7982/mockhttpserver"
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"github.com/vishav7982/mockhttpserver"
 )
-
 func main() {
-    // Start mock server
-    ms := mockhttpserver.NewMockServer()
-    defer ms.Close()
-    // Setup expectation: POST /login with body from file
-    exp, err := mockhttpserver.Expect("POST", "/login").
-        WithRequestBodyFromFile("testdata/sample-request.json").
-        AndRespondFromFile("testdata/sample-response.json", 200)
-    if err != nil {
-        log.Fatalf("failed to create expectation: %v", err)
-    }
-    ms.AddExpectation(exp)
-    // Read request body from testdata folder
-    reqBody, err := os.ReadFile("testdata/sample-request.json")
-    if err != nil {
-        log.Fatalf("failed to read request file: %v", err)
-    }
-    // Perform HTTP request against mock server
-    resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
-    if err != nil {
-        log.Fatalf("request failed: %v", err)
-    }
-    defer resp.Body.Close()
-    // Print response
-    body, _ := io.ReadAll(resp.Body)
-    fmt.Println("Status:", resp.StatusCode)
-    fmt.Println("Response:", string(body))
+	// Start mock server
+	ms := mockhttpserver.NewMockServer()
+	defer ms.Close()
+	// Expect a POST /login with JSON body
+	exp := mockhttpserver.Expect("POST", "/login").
+		WithRequestBody(`{"username":"alice","password":"secret"}`).
+		AndRespondWithString(`{"token":"abc123","expires":3600}`, 200)
+	ms.AddExpectation(exp)
+	// Send a request to mock server
+	reqBody := []byte(`{"username":"alice","password":"secret"}`)
+	resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		log.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println("Status:", resp.StatusCode)
+	fmt.Println("Response:", string(body))
 }
 ```
 📖 For more examples(headers, query params, custom responders, unmatched handlers etc.), see [server_test.go](./server_test.go).
@@ -114,4 +103,5 @@ If you’d like to improve **mockhttpserver**, here’s how you can help:
 7. Open a Pull Request on GitHub, clearly describe your change,reference related issues if applicable
 
 8. Ensure CI tests pass
+
 
