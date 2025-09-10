@@ -39,8 +39,7 @@ func DefaultConfig() Config {
 	}
 }
 
-// MockServer represents a lightweight HTTP mock server that can
-// be used to simulate responses for testing HTTP clients.
+// MockServer represents a lightweight HTTP mock server for testing HTTP clients.
 type MockServer struct {
 	server             *httptest.Server
 	expectations       []*Expectation
@@ -66,7 +65,7 @@ func NewMockServerWithConfig(config Config) *MockServer {
 	return ms
 }
 
-// WithLogger allows injecting a custom logger (e.g., zap, slog adapter).
+// WithLogger allows injecting a custom logger.
 func (m *MockServer) WithLogger(logger *log.Logger) *MockServer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -74,8 +73,7 @@ func (m *MockServer) WithLogger(logger *log.Logger) *MockServer {
 	return m
 }
 
-// WithUnmatchedResponder allows configuring a custom handler for unmatched requests.
-// If set, this callback is invoked instead of the default unmatched response.
+// WithUnmatchedResponder allows setting a custom handler for unmatched requests.
 func (m *MockServer) WithUnmatchedResponder(
 	handler func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest),
 ) *MockServer {
@@ -139,14 +137,13 @@ func (m *MockServer) ClearUnmatchedRequests() {
 }
 
 // VerifyExpectations checks if all expectations were called the expected number of times.
-// Returns an error describing any unmet expectations.
 func (m *MockServer) VerifyExpectations() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var unmet []string
 	for _, exp := range m.expectations {
-		if exp.expectedCalls != nil && exp.callCount != *exp.expectedCalls {
+		if exp.MaxCalls != nil && exp.InvocationCount != *exp.MaxCalls {
 			unmet = append(unmet, exp.String())
 		}
 	}
@@ -161,13 +158,9 @@ func (m *MockServer) VerifyExpectations() error {
 }
 
 // handler processes incoming HTTP requests and returns the configured mock response.
-// If no expectation matches, it responds with either a custom unmatchedResponder
-// (if provided) or the default unmatched status code.
 func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
-	// Read request body with size limit
 	var body []byte
 	var err error
-
 	if r.Body != nil {
 		if m.config.MaxBodySize > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, m.config.MaxBodySize)
@@ -180,37 +173,42 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	if m.config.VerboseLogging {
 		m.logger.Printf("Incoming request: %s %s, Headers: %+v, Body: %s",
 			r.Method, r.URL.String(), r.Header, string(body))
 	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// Iterate over all expectations to find a match
 	for _, exp := range m.expectations {
 		if exp.matches(r, body) {
-			exp.callCount++
-
-			for key, value := range exp.responseHeaders {
+			if exp.MaxCalls != nil && exp.InvocationCount >= *exp.MaxCalls {
+				continue
+			}
+			exp.InvocationCount++
+			resp := ResponseDefinition{}
+			// If user configured responses, pick the right one
+			if len(exp.Responses) > 0 {
+				resp = exp.Responses[exp.NextResponseIndex]
+				if exp.NextResponseIndex < len(exp.Responses)-1 {
+					exp.NextResponseIndex++
+				}
+			}
+			// Write headers
+			for key, value := range resp.Headers {
 				w.Header().Set(key, value)
 			}
-
-			w.WriteHeader(exp.ResCode)
-			if _, err := w.Write([]byte(exp.ResBody)); err != nil {
+			w.WriteHeader(resp.StatusCode)
+			if _, err := w.Write(resp.Body); err != nil {
 				m.logger.Printf("Failed to write response: %v", err)
 			}
-
 			if m.config.VerboseLogging {
-				m.logger.Printf("Matched expectation, responding with status %d", exp.ResCode)
+				m.logger.Printf("Matched expectation, responding with status %d", resp.StatusCode)
 			}
 			return
 		}
 	}
 
-	// Record unmatched request
+	// No match -> record unmatched
 	unmatched := UnmatchedRequest{
 		Method:    r.Method,
 		URL:       r.URL.RequestURI(),
@@ -219,16 +217,17 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 	m.unmatchedRequests = append(m.unmatchedRequests, unmatched)
+
 	if m.config.LogUnmatched {
 		m.logger.Printf("Unexpected Request:\nMethod=%s\nURI=%s\nHeaders=%+v\nBody=%s\n",
 			r.Method, r.URL.RequestURI(), r.Header, string(body))
 	}
+
 	if m.unmatchedResponder != nil {
-		// Use custom callback
 		m.unmatchedResponder(w, r, unmatched)
 		return
 	}
-	// Default response
+
 	http.Error(w, m.config.UnmatchedStatusMessage, m.config.UnmatchedStatusCode)
 }
 
