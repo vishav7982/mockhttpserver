@@ -289,7 +289,7 @@ func (e *Expectation) matches(r *http.Request, body []byte) bool {
 	for key, expectedValue := range e.Request.Headers {
 		actualValue := r.Header.Get(key)
 		if actualValue == "" {
-			actualValue = r.Header.Get(http.CanonicalHeaderKey(key))
+			actualValue = r.Header.Get(key)
 		}
 		if actualValue != expectedValue {
 			return false
