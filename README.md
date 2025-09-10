@@ -5,13 +5,19 @@ A **lightweight and flexible HTTP mock server for Go** — built on `httptest.Se
 ---
 
 ## Features
+- Flexible Expectations: Match requests by HTTP method, path, headers, query parameters, and body.
 
-- Define expectations: method, path, headers, query, and body
-- Respond with strings, files, or custom functions
-- Customizable unmatched request handling
-- Thread-safe with call count tracking
-- Middleware support
+- Multiple Response Types: Respond with strings, files, or custom handler functions, including sequential responses.
 
+- MaxCalls Enforcement: Limit the number of times an expectation can be matched.
+
+- Unmatched Request Handling: Automatically record unmatched requests, retrieve them (GetUnmatchedRequests), clear them (ClearUnmatchedRequests), and define custom responders.
+
+- Thread-Safe: Supports concurrent requests with call count tracking for each expectation.
+
+- Logging & Verbose Mode: Inject a custom logger and enable verbose request/response logging.
+
+- Middleware Support: Add middleware to intercept or modify requests globally.
 ---
 
 ## Install
@@ -25,8 +31,8 @@ go get github.com/vishav7982/mockhttpserver
 ms := mockhttpserver.NewMockServer()
 defer ms.Close()
 
-exp, _ := mockhttpserver.Expect("GET", "/ping").
-    AndRespond(200, `{"message":"pong"}`)
+exp := mockhttpserver.NewExpectation("GET", "/ping").
+AndRespondWithString(`{"message":"pong"}`, 200)
 ms.AddExpectation(exp)
 
 resp, _ := http.Get(ms.URL() + "/ping")
@@ -38,36 +44,52 @@ That’s it — define an expectation, add it to the server, and make requests a
 ### Integration Example 
 ```go
 package main
+
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"github.com/vishav7982/mockhttpserver"
+   "bytes"
+   "fmt"
+   "io"
+   "log"
+   "net/http"
+
+   "github.com/vishav7982/mockhttpserver"
 )
+
 func main() {
-	// Start mock server
-	ms := mockhttpserver.NewMockServer()
-	defer ms.Close()
-	// Expect a POST /login with JSON body
-	exp := mockhttpserver.Expect("POST", "/login").
-		WithRequestBody(`{"username":"alice","password":"secret"}`).
-		AndRespondWithString(`{"token":"abc123","expires":3600}`, 200)
-	ms.AddExpectation(exp)
-	// Send a request to mock server
-	reqBody := []byte(`{"username":"alice","password":"secret"}`)
-	resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		log.Fatalf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	fmt.Println("Status:", resp.StatusCode)
-	fmt.Println("Response:", string(body))
+   ms := mockhttpserver.NewMockServer()
+   defer ms.Close()
+
+   // GET /ping
+   getExp := mockhttpserver.NewExpectation("GET", "/ping").
+      AndRespondWithString(`{"message":"pong"}`, 200)
+   ms.AddExpectation(getExp)
+
+   resp, err := http.Get(ms.URL() + "/ping")
+   if err != nil {
+      log.Fatal(err)
+   }
+   defer resp.Body.Close()
+   body, _ := io.ReadAll(resp.Body)
+   fmt.Println("GET /ping:", resp.StatusCode, string(body))
+
+   // POST /login
+   postExp := mockhttpserver.NewExpectation("POST", "/login").
+      WithRequestBody([]byte(`{"username":"alice","password":"secret"}`)).
+      AndRespondWithString(`{"token":"abc123","expires":3600}`, 200)
+   ms.AddExpectation(postExp)
+
+   reqBody := []byte(`{"username":"alice","password":"secret"}`)
+   resp, err = http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
+   if err != nil {
+      log.Fatal(err)
+   }
+   defer resp.Body.Close()
+   body, _ = io.ReadAll(resp.Body)
+   fmt.Println("POST /login:", resp.StatusCode, string(body))
 }
+
 ```
-📖 For more examples(headers, query params, custom responders, unmatched handlers etc.), see [server_test.go](./server_test.go).
+📖 For more extensive usage examples — including headers, query parameters, sequential responses, custom responders, and unmatched request handling — see [mock_server_test.go](./mock_server_test.go).
 ## Why Use It ?
 - Eliminate flaky network calls in tests
 - Verify client code sends requests correctly
