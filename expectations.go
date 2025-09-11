@@ -10,19 +10,66 @@ import (
 	"strings"
 )
 
-// NewExpectation creates a new Expectation for a given HTTP method and path.
-// Example: mockserver.Expect("GET", "/api/resource")
-func NewExpectation(method, path string) *Expectation {
+// NewExpectation creates a new default Expectation.
+func NewExpectation() *Expectation {
 	return &Expectation{
 		Request: RequestExpectation{
-			Method:  method,
-			Path:    path,
 			Headers: make(map[string]string),
 		},
 		Responses:         []ResponseDefinition{},
 		NextResponseIndex: 0,
 		InvocationCount:   0,
+		MaxCalls:          nil, //unlimited by default
 	}
+}
+
+// WithRequestMethod sets the HTTP method for this expectation.
+// Example: .WithRequestMethod("GET")
+func (e *Expectation) WithRequestMethod(method string) *Expectation {
+	e.Request.Method = method
+	return e
+}
+
+// WithPath sets a path pattern for the Expectation.
+// It converts curly-brace path variables to regex automatically.
+// Example: .WithPath("/api/{id}/foo/{name}")
+func (e *Expectation) WithPath(pattern string) *Expectation {
+	regexPattern := convertBracesToRegex(pattern)
+	compiled, err := regexp.Compile(regexPattern)
+	if err != nil {
+		panic(fmt.Sprintf("invalid path pattern %q: %v", pattern, err))
+	}
+	e.Request.PathPattern = compiled
+	return e
+}
+
+// WithPathVariable adds a single expected path variable (for use with named capture groups).
+// Example: .WithPathVariable("id", "123")
+func (e *Expectation) WithPathVariable(key, value string) *Expectation {
+	if e.Request.PathVariables == nil {
+		e.Request.PathVariables = make(map[string]string)
+	}
+	e.Request.PathVariables[key] = value
+	return e
+}
+
+// WithPathVariables adds multiple expected path variables at once.
+// Example: .WithPathVariables(map[string]string{"id": "123", "name": "john"})
+func (e *Expectation) WithPathVariables(vars map[string]string) *Expectation {
+	if e.Request.PathVariables == nil {
+		e.Request.PathVariables = make(map[string]string)
+	}
+	for k, v := range vars {
+		e.Request.PathVariables[k] = v
+	}
+	return e
+}
+
+func convertBracesToRegex(pattern string) string {
+	// Replace {var} with (?P<var>[^/]+)
+	re := regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+	result := re.ReplaceAllString(pattern, `(?P<$1>[^/]+)`)
+	return "^" + result + "$"
 }
 
 // WithQueryParam adds a query parameter matcher to the Expectation.
@@ -69,17 +116,6 @@ func (e *Expectation) WithHeaders(headers map[string]string) *Expectation {
 		e.Request.Headers[strings.ToLower(k)] = v
 	}
 	return e
-}
-
-// WithPathPattern sets a regex pattern for matching the path instead of exact match.
-// Example: .WithPathPattern("/api/users/\\d+")
-func (e *Expectation) WithPathPattern(pattern string) (*Expectation, error) {
-	compiled, err := regexp.Compile(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("invalid path pattern %q: %w", pattern, err)
-	}
-	e.Request.PathPattern = compiled
-	return e, nil
 }
 
 // WithRequestBody sets the expected raw request body for this Expectation.
@@ -264,38 +300,58 @@ func (e *Expectation) AndRespondFromFile(filePath string, statusCode int) (*Expe
 
 // matches checks if a request matches this expectation.
 func (e *Expectation) matches(r *http.Request, body []byte) bool {
-	// Match HTTP method
+	// --- HTTP Method Matching ---
 	if r.Method != e.Request.Method {
 		return false
 	}
-	// Match path (exact or pattern)
+
+	// --- Path / PathPattern Matching ---
 	if e.Request.PathPattern != nil {
-		if !e.Request.PathPattern.MatchString(r.URL.Path) {
+		pathMatches := e.Request.PathPattern.FindStringSubmatch(r.URL.Path)
+		if pathMatches == nil {
 			return false
 		}
+		// Capture named groups from regex
+		groupNames := e.Request.PathPattern.SubexpNames()
+		capturedGroups := make(map[string]string, len(groupNames))
+		for groupIndex, groupName := range groupNames {
+			if groupIndex > 0 && groupName != "" {
+				capturedGroups[groupName] = pathMatches[groupIndex]
+			}
+		}
+		// Validate that all path variables exactly match expectation
+		for variableKey, expectedValue := range e.Request.PathVariables {
+			actualValue, found := capturedGroups[variableKey]
+			if !found {
+				// Variable not found in the request path
+				return false
+			}
+			if expectedValue != actualValue {
+				// Value mismatch → fail
+				return false
+			}
+		}
 	} else if r.URL.Path != e.Request.Path {
+		// Exact path match if no pattern provided
 		return false
 	}
-	// Match query parameters
+	// --- Query Parameter Matching ---
 	if len(e.Request.QueryParams) > 0 {
-		q := r.URL.Query()
-		for key, expectedValue := range e.Request.QueryParams {
-			if q.Get(key) != expectedValue {
+		query := r.URL.Query()
+		for paramKey, expectedValue := range e.Request.QueryParams {
+			if query.Get(paramKey) != expectedValue {
 				return false
 			}
 		}
 	}
-	// Match headers (case-insensitive)
-	for key, expectedValue := range e.Request.Headers {
-		actualValue := r.Header.Get(key)
-		if actualValue == "" {
-			actualValue = r.Header.Get(key)
-		}
-		if actualValue != expectedValue {
+	// --- Header Matching ---
+	for headerKey, expectedValue := range e.Request.Headers {
+		actualHeaderValue := r.Header.Get(headerKey)
+		if actualHeaderValue != expectedValue {
 			return false
 		}
 	}
-	// Match body
+	// --- Body Matching ---
 	if e.Request.BodyMatcher != nil {
 		return e.Request.BodyMatcher(body)
 	} else if len(e.Request.Body) > 0 && !reflect.DeepEqual(body, e.Request.Body) {

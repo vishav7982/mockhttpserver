@@ -31,7 +31,9 @@ func TestMockServer_Basic(t *testing.T) {
 	defer ms.Close()
 
 	ms.AddExpectation(
-		NewExpectation("POST", "/hello").
+		NewExpectation().
+			WithRequestMethod("POST").
+			WithPath("/hello").
 			WithRequestBodyString("world").
 			AndRespondWithString("ok", 200),
 	)
@@ -57,7 +59,9 @@ func TestMockServer_QueryParamsAndHeaders(t *testing.T) {
 	defer ms.Close()
 
 	ms.AddExpectation(
-		NewExpectation("GET", "/search").
+		NewExpectation().
+			WithRequestMethod("GET").
+			WithPath("/search").
 			WithQueryParam("q", "golang").
 			WithHeader("X-Test", "true").
 			AndRespondWithString("found", 200),
@@ -124,7 +128,10 @@ func TestMockServer_JSONBodyMatching(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("POST", "/api").WithRequestJSONBody(`{"ping":"pong"}`)
+	exp, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestJSONBody(`{"ping":"pong"}`)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -144,7 +151,10 @@ func TestMockServer_JSONBodyMatching(t *testing.T) {
 
 // TestMockServer_InvalidJSONBody tests error handling for invalid JSON.
 func TestMockServer_InvalidJSONBody(t *testing.T) {
-	_, err := NewExpectation("POST", "/api").WithRequestJSONBody(`{"invalid":json}`)
+	_, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestJSONBody(`{"invalid":json}`)
 	if err == nil {
 		t.Error("expected error for invalid JSON, got nil")
 	}
@@ -155,7 +165,10 @@ func TestMockServer_PartialJSONMatching(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("POST", "/api").WithPartialJSONBody(`{"name":"test"}`)
+	exp, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithPartialJSONBody(`{"name":"test"}`)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -179,11 +192,9 @@ func TestMockServer_PathPattern(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("GET", "").WithPathPattern(`/users/\d+`)
-	if err != nil {
-		t.Fatalf("failed to create expectation: %v", err)
-	}
-
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath(`/users/\d+`)
 	ms.AddExpectation(exp.AndRespondWithString("user found", 200))
 
 	resp, err := http.Get(ms.URL() + "/users/123")
@@ -202,7 +213,9 @@ func TestMockServer_CallCounting(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/test").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/test").
 		AndRespondWithString("ok", 200).
 		Times(2)
 
@@ -240,7 +253,9 @@ func TestMockServer_UnmetExpectations(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/test").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/test").
 		AndRespondWithString("ok", 200).
 		Times(3)
 
@@ -262,7 +277,9 @@ func TestMockServer_ConcurrentRequests(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/concurrent").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/concurrent").
 		AndRespondWithString("ok", 200)
 
 	ms.AddExpectation(exp)
@@ -318,7 +335,10 @@ func TestMockServer_ResponseFromFile(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("GET", "/api").AndRespondFromFile(filePath, 200)
+	exp, err := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		AndRespondFromFile(filePath, 200)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -348,7 +368,10 @@ func TestMockServer_RequestBodyFromFile(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("POST", "/api").WithRequestBodyFromFile(filePath)
+	exp, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestBodyFromFile(filePath)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -372,7 +395,9 @@ func TestMockServer_ResponseHeaders(t *testing.T) {
 	defer ms.Close()
 
 	ms.AddExpectation(
-		NewExpectation("GET", "/headers").
+		NewExpectation().
+			WithRequestMethod("GET").
+			WithPath("/headers").
 			WithResponseHeader("Content-Type", "application/json").
 			WithResponseHeader("X-Custom", "test-value").
 			AndRespondWithString(`{"message":"hello"}`, 500),
@@ -402,7 +427,9 @@ func TestMockServer_MultipleResponsesWithHeaders(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/multi-seq").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/multi-seq").
 		WithResponseHeader("X-Step", "1").
 		AndRespondWithString(`{"step":"one"}`, 200).
 		WithResponseHeader("X-Step", "2").
@@ -452,7 +479,9 @@ func TestExpectation_MultipleHeadersAndResponses(t *testing.T) {
 	defer ms.Close()
 
 	// Expectation with multiple headers and responses
-	exp := NewExpectation("GET", "/multi-seq").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/multi-seq").
 		WithResponseHeader("X-Step", "1").
 		AndRespondWithString(`{"step":"one"}`, 200).
 		WithResponseHeader("X-Step", "2").
@@ -503,8 +532,14 @@ func TestMockServer_ExpectationManagement(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp1 := NewExpectation("GET", "/test1").AndRespondWithString("ok1", 200)
-	exp2 := NewExpectation("GET", "/test2").AndRespondWithString("ok2", 200)
+	exp1 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/test1").
+		AndRespondWithString("ok1", 200)
+	exp2 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/test2").
+		AndRespondWithString("ok2", 200)
 
 	ms.AddExpectation(exp1)
 	ms.AddExpectation(exp2)
@@ -578,7 +613,9 @@ func TestMockServer_RequestBodyContains(t *testing.T) {
 	defer ms.Close()
 
 	ms.AddExpectation(
-		NewExpectation("POST", "/search").
+		NewExpectation().
+			WithRequestMethod("POST").
+			WithPath("/search").
 			WithRequestBodyContains("golang").
 			AndRespondWithString("found", 200),
 	)
@@ -651,7 +688,10 @@ func TestMockServer_RequestAndResponseFromFile(t *testing.T) {
 	reqFile := filepath.Join("testdata", "sample-request.json")
 	respFile := filepath.Join("testdata", "sample-response.json")
 
-	exp, err := NewExpectation("POST", "/login").WithRequestBodyFromFile(reqFile)
+	exp, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/login").
+		WithRequestBodyFromFile(reqFile)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -706,7 +746,9 @@ func TestExpectation_MaxCallsEnforcement(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/max-calls").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/max-calls").
 		AndRespondWithString("ok", 200).
 		Times(2) // allow only 2 calls
 
@@ -747,7 +789,9 @@ func TestExpectation_MultipleHeadersBeforeBody(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/multi-headers").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/multi-headers").
 		WithResponseHeader("X-A", "a").
 		WithResponseHeaders(map[string]string{"X-B": "b", "X-C": "c"}).
 		AndRespondWithString("ok", 200)
@@ -767,7 +811,9 @@ func TestExpectation_LongSequentialResponses(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/long-seq").
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/long-seq").
 		AndRespondWithString("one", 200).
 		AndRespondWithString("two", 201).
 		AndRespondWithString("three", 202)
@@ -816,7 +862,10 @@ func TestExpectation_MalformedJSONRequest(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp, err := NewExpectation("POST", "/json").WithRequestJSONBody(`{"name": "valid"}`)
+	exp, err := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/json").
+		WithRequestJSONBody(`{"name": "valid"}`)
 	if err != nil {
 		t.Fatalf("failed to create expectation: %v", err)
 	}
@@ -877,7 +926,10 @@ func TestMockServer_UseMiddleware(t *testing.T) {
 		})
 	})
 
-	exp := NewExpectation("GET", "/middleware").AndRespondWithString("ok", 200)
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/middleware").
+		AndRespondWithString("ok", 200)
 	ms.AddExpectation(exp)
 
 	resp, _ := http.Get(ms.URL() + "/middleware")
@@ -893,7 +945,10 @@ func TestMockServer_NilBodyRequest(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
 
-	exp := NewExpectation("GET", "/nobody").AndRespondWithString("ok", 200)
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/nobody").
+		AndRespondWithString("ok", 200)
 	ms.AddExpectation(exp)
 
 	req, _ := http.NewRequest("GET", ms.URL()+"/nobody", nil)
@@ -984,7 +1039,10 @@ func TestMockServer_LoggerAndVerbose(t *testing.T) {
 
 	// Add an expectation
 	ms.AddExpectation(
-		NewExpectation("GET", "/exists").AndRespondWithString("ok", 200),
+		NewExpectation().
+			WithRequestMethod("GET").
+			WithPath("/exists").
+			AndRespondWithString("ok", 200),
 	)
 
 	// 1. Trigger a matched request

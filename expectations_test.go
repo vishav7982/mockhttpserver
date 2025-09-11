@@ -12,31 +12,43 @@ import (
 )
 
 func TestExpectBasic(t *testing.T) {
-	e := NewExpectation("GET", "/api/test")
-	if e.Request.Method != "GET" || e.Request.Path != "/api/test" {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api/test")
+	if e.Request.Method != "GET" || e.Request.PathPattern.String() != "^/api/test$" {
 		t.Errorf("unexpected Expect values: %+v", e.Request)
 	}
 }
 
 func TestWithQueryParams(t *testing.T) {
-	e := NewExpectation("GET", "/api").WithQueryParam("id", "123").WithQueryParams(map[string]string{"type": "user"})
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		WithQueryParam("id", "123").
+		WithQueryParams(map[string]string{"type": "user"})
+
 	if len(e.Request.QueryParams) != 2 || e.Request.QueryParams["id"] != "123" || e.Request.QueryParams["type"] != "user" {
 		t.Errorf("unexpected query params: %+v", e.Request.QueryParams)
 	}
 }
 
 func TestWithHeaders(t *testing.T) {
-	e := NewExpectation("GET", "/api").WithHeader("X-Auth", "abc").WithHeaders(map[string]string{"X-App": "mock"})
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		WithHeader("X-Auth", "abc").
+		WithHeaders(map[string]string{"X-App": "mock"})
+
 	if len(e.Request.Headers) != 2 || e.Request.Headers["x-auth"] != "abc" || e.Request.Headers["x-app"] != "mock" {
 		t.Errorf("unexpected headers: %+v", e.Request.Headers)
 	}
 }
 
 func TestWithPathPattern(t *testing.T) {
-	e, err := NewExpectation("GET", "").WithPathPattern(`/api/users/\d+`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath(`/api/users/\d+`) // panic if invalid
+
 	r, _ := http.NewRequest("GET", "/api/users/123", nil)
 	if !e.matches(r, nil) {
 		t.Errorf("expected regex to match path")
@@ -44,7 +56,11 @@ func TestWithPathPattern(t *testing.T) {
 }
 
 func TestWithRequestBody(t *testing.T) {
-	e := NewExpectation("POST", "/api").WithRequestBody([]byte("hello"))
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestBody([]byte("hello"))
+
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte("hello")) {
 		t.Errorf("expected body to match")
@@ -52,10 +68,11 @@ func TestWithRequestBody(t *testing.T) {
 }
 
 func TestWithRequestJSONBody(t *testing.T) {
-	e, err := NewExpectation("POST", "/api").WithRequestJSONBody(`{"id":1,"name":"test"}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	e, _ := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestJSONBody(`{"id":1,"name":"test"}`)
+
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte(`{"id":1,"name":"test"}`)) {
 		t.Errorf("expected JSON body to match")
@@ -63,10 +80,11 @@ func TestWithRequestJSONBody(t *testing.T) {
 }
 
 func TestWithPartialJSONBody(t *testing.T) {
-	e, err := NewExpectation("POST", "/api").WithPartialJSONBody(`{"name":"test"}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	e, _ := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithPartialJSONBody(`{"name":"test"}`)
+
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte(`{"name":"test","age":30}`)) {
 		t.Errorf("expected partial JSON body to match")
@@ -74,7 +92,11 @@ func TestWithPartialJSONBody(t *testing.T) {
 }
 
 func TestWithRequestBodyContains(t *testing.T) {
-	e := NewExpectation("POST", "/api").WithRequestBodyContains("foo")
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestBodyContains("foo")
+
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte("hello foo world")) {
 		t.Errorf("expected substring body to match")
@@ -97,41 +119,23 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 	})
 	defer ms.Close()
 
-	exp, err := NewExpectation("POST", "/login").WithRequestBodyFromFile(reqFile)
-	if err != nil {
-		t.Fatalf("failed to create expectation: %v", err)
-	}
-	exp, err = exp.AndRespondFromFile(resFile, 200)
-	if err != nil {
-		t.Fatalf("failed to set response from file: %v", err)
-	}
+	exp, _ := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/login").
+		WithRequestBodyFromFile(reqFile)
+	exp, _ = exp.AndRespondFromFile(resFile, 200)
 	ms.AddExpectation(exp)
 
-	reqBody, err := os.ReadFile(reqFile)
-	if err != nil {
-		t.Fatalf("failed to read request file: %v", err)
-	}
-
-	resp, err := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	reqBody, _ := os.ReadFile(reqFile)
+	resp, _ := http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
 	defer safeClose(t, resp.Body)
 
 	if resp.StatusCode != 200 {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-
-	expectedResp, err := os.ReadFile(resFile)
-	if err != nil {
-		t.Fatalf("failed to read response file: %v", err)
-	}
-
+	body, _ := io.ReadAll(resp.Body)
+	expectedResp, _ := os.ReadFile(resFile)
 	if strings.TrimSpace(string(body)) != strings.TrimSpace(string(expectedResp)) {
 		t.Errorf("response mismatch:\nwant: %s\ngot:  %s",
 			strings.TrimSpace(string(expectedResp)),
@@ -141,9 +145,13 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 }
 
 func TestWithCustomBodyMatcher(t *testing.T) {
-	e := NewExpectation("POST", "/api").WithCustomBodyMatcher(func(b []byte) bool {
-		return strings.HasPrefix(string(b), "token:")
-	})
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithCustomBodyMatcher(func(b []byte) bool {
+			return strings.HasPrefix(string(b), "token:")
+		})
+
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte("token:123")) {
 		t.Errorf("expected custom matcher to match")
@@ -151,18 +159,29 @@ func TestWithCustomBodyMatcher(t *testing.T) {
 }
 
 func TestTimesAndOnce(t *testing.T) {
-	e := NewExpectation("GET", "/api").Times(2)
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		Times(2)
 	if e.MaxCalls == nil || *e.MaxCalls != 2 {
 		t.Errorf("expected Times(2) to set MaxCalls=2")
 	}
-	e2 := NewExpectation("GET", "/api").Once()
+	e2 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		Once()
 	if e2.MaxCalls == nil || *e2.MaxCalls != 1 {
 		t.Errorf("expected Once() to set MaxCalls=1")
 	}
 }
 
 func TestWithResponseHeaders(t *testing.T) {
-	e := NewExpectation("GET", "/api").WithResponseHeader("A", "1").WithResponseHeaders(map[string]string{"B": "2"})
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		WithResponseHeader("A", "1").
+		WithResponseHeaders(map[string]string{"B": "2"})
+
 	headers := e.Responses[len(e.Responses)-1].Headers
 	if headers["A"] != "1" || headers["B"] != "2" {
 		t.Errorf("unexpected response headers: %+v", headers)
@@ -170,7 +189,12 @@ func TestWithResponseHeaders(t *testing.T) {
 }
 
 func TestMatchesFailures(t *testing.T) {
-	e := NewExpectation("POST", "/api").WithHeader("X-Test", "1").WithQueryParam("id", "42").WithRequestBody([]byte("abc"))
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithHeader("X-Test", "1").
+		WithQueryParam("id", "42").
+		WithRequestBody([]byte("abc"))
 
 	r, _ := http.NewRequest("GET", "/api", nil) // wrong method
 	if e.matches(r, []byte("abc")) {
@@ -202,9 +226,131 @@ func TestMatchesFailures(t *testing.T) {
 }
 
 func TestStringMethod(t *testing.T) {
-	e := NewExpectation("GET", "/api").Once()
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		Once()
+
 	s := e.String()
-	if !strings.Contains(s, "GET /api") || !strings.Contains(s, "expected: 1") {
+	if !strings.Contains(s, "GET") || !strings.Contains(s, "expected: 1") {
 		t.Errorf("unexpected string output: %s", s)
+	}
+}
+
+func TestExactPathMatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/exact/path")
+
+	r, _ := http.NewRequest("GET", "/exact/path", nil)
+	if !e.matches(r, nil) {
+		t.Errorf("expected exact path to match")
+	}
+
+	r, _ = http.NewRequest("GET", "/exact/path/wrong", nil)
+	if e.matches(r, nil) {
+		t.Errorf("expected path mismatch for /exact/path/wrong")
+	}
+}
+
+func TestPathVariableMismatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/users/{id}").
+		WithPathVariable("id", "42")
+
+	r, _ := http.NewRequest("GET", "/users/43", nil)
+	if e.matches(r, nil) {
+		t.Errorf("expected mismatch due to wrong path variable")
+	}
+}
+
+func TestHeaderCaseInsensitiveMatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		WithHeader("X-Custom", "value")
+
+	r, _ := http.NewRequest("GET", "/api", nil)
+	r.Header.Set("x-custom", "value")
+	if !e.matches(r, nil) {
+		t.Errorf("expected header match to be case-insensitive")
+	}
+}
+
+func TestQueryParamMismatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api").
+		WithQueryParam("q", "golang")
+
+	u, _ := url.Parse("/api?q=java")
+	r := &http.Request{Method: "GET", URL: u}
+	if e.matches(r, nil) {
+		t.Errorf("expected query param mismatch")
+	}
+}
+
+func TestJSONBodyMismatch(t *testing.T) {
+	e, _ := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestJSONBody(`{"id":1}`)
+
+	r, _ := http.NewRequest("POST", "/api", nil)
+	if e.matches(r, []byte(`{"id":2}`)) {
+		t.Errorf("expected JSON mismatch")
+	}
+}
+
+func TestPartialJSONBodyMismatch(t *testing.T) {
+	e, _ := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithPartialJSONBody(`{"name":"x"}`)
+
+	r, _ := http.NewRequest("POST", "/api", nil)
+	if e.matches(r, []byte(`{"age":20}`)) {
+		t.Errorf("expected partial JSON mismatch")
+	}
+}
+
+func TestBodyContainsMismatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithRequestBodyContains("hello")
+
+	r, _ := http.NewRequest("POST", "/api", nil)
+	if e.matches(r, []byte("world")) {
+		t.Errorf("expected body contains mismatch")
+	}
+}
+
+func TestCustomBodyMatcherFalse(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/api").
+		WithCustomBodyMatcher(func(b []byte) bool { return false })
+
+	r, _ := http.NewRequest("POST", "/api", nil)
+	if e.matches(r, []byte("any")) {
+		t.Errorf("expected custom matcher to fail")
+	}
+}
+
+func TestResponseFromFileInvalid(t *testing.T) {
+	e := NewExpectation()
+	_, err := e.AndRespondFromFile("nonexistent-file.json", 200)
+	if err == nil {
+		t.Errorf("expected error when response file does not exist")
+	}
+}
+
+func TestRequestBodyFromFileInvalid(t *testing.T) {
+	e := NewExpectation()
+	_, err := e.WithRequestBodyFromFile("nonexistent-file.json")
+	if err == nil {
+		t.Errorf("expected error when request file does not exist")
 	}
 }

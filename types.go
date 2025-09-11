@@ -11,14 +11,15 @@ type ResponseDefinition struct {
 
 // RequestExpectation defines the expected request structure.
 type RequestExpectation struct {
-	Method       string
-	Path         string
-	PathPattern  *regexp.Regexp
-	Body         []byte
-	BodyMatcher  func([]byte) bool
-	QueryParams  map[string]string
-	Headers      map[string]string // stored as lowercase keys for case-insensitive matching
-	BodyFromFile bool
+	Method        string
+	Path          string
+	PathPattern   *regexp.Regexp
+	PathVariables map[string]string
+	Body          []byte
+	BodyMatcher   func([]byte) bool
+	QueryParams   map[string]string
+	Headers       map[string]string // stored as lowercase keys for case-insensitive matching
+	BodyFromFile  bool
 }
 
 // Expectation defines a mock expectation for HTTP requests.
