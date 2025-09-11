@@ -3,7 +3,7 @@
 A **lightweight and flexible HTTP mock server for Go** — built on `httptest.Server` to make client testing simple.
 # mockhttpserver
 
-![Go CI](https://github.com/vishav7982/mockhttpserver/actions/workflows/ci.yml/badge.svg)
+![Go CI](https://github.com/vishav7982/mockhttpserver/actions/workflows/mockhttpserver-ci.yml/badge.svg?branch=main)
 [![Coverage](https://codecov.io/gh/vishav7982/mockhttpserver/branch/main/graph/badge.svg)](https://codecov.io/gh/vishav7982/mockhttpserver)
 ---
 
