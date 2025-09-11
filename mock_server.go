@@ -9,24 +9,6 @@ import (
 	"time"
 )
 
-// UnmatchedRequest represents a request that didn't match any expectations
-type UnmatchedRequest struct {
-	Method    string
-	URL       string
-	Headers   map[string][]string
-	Body      string
-	Timestamp time.Time
-}
-
-// Config holds configuration options for MockServer
-type Config struct {
-	UnmatchedStatusCode    int    // Status code for unmatched requests (default: 418)
-	UnmatchedStatusMessage string // Status message for unmatched requests (default: "Unmatched Request")
-	LogUnmatched           bool   // Whether to log unmatched requests (default: true)
-	MaxBodySize            int64  // Maximum request body size in bytes (default: 10MB)
-	VerboseLogging         bool   // Enable verbose request/response logging (default: false)
-}
-
 // DefaultConfig returns the default configuration
 func DefaultConfig() Config {
 	return Config{
@@ -181,6 +163,10 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 					exp.NextResponseIndex++
 				}
 			}
+			if resp.TimeoutSimulation {
+				<-r.Context().Done() // blocks until the request is canceled by the client
+				return
+			}
 			// Simulate delayed response.
 			if resp.Delay > 0 {
 				time.Sleep(resp.Delay)
@@ -235,21 +221,10 @@ func (m *MockServer) Use(middleware func(http.Handler) http.Handler) {
 	m.server.Config.Handler = middleware(m.server.Config.Handler)
 }
 
-// mockRoundTripper allows http.Client to route through the mock server.
-type mockRoundTripper struct {
-	server *MockServer
-}
-
 func (rt *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.URL.Scheme = "http"
 	req.URL.Host = rt.server.server.Listener.Addr().String()
 	return http.DefaultTransport.RoundTrip(req)
-}
-
-// ExpectationError represents errors related to unmet expectations
-type ExpectationError struct {
-	Message string
-	Details []string
 }
 
 func (e *ExpectationError) Error() string {

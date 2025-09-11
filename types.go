@@ -11,10 +11,11 @@ import (
 
 // ResponseDefinition defines a mock response for an expectation.
 type ResponseDefinition struct {
-	StatusCode int
-	Body       []byte
-	Headers    map[string]string
-	Delay      time.Duration // optional delay before sending response
+	StatusCode        int
+	Body              []byte
+	Headers           map[string]string
+	Delay             time.Duration // optional delay before sending response
+	TimeoutSimulation bool          // if true, server never responds
 }
 
 // RequestExpectation defines the expected request structure.
@@ -50,4 +51,33 @@ type MockServer struct {
 	logger             *log.Logger
 	config             Config
 	unmatchedResponder func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest)
+}
+
+// UnmatchedRequest represents a request that didn't match any expectations
+type UnmatchedRequest struct {
+	Method    string
+	URL       string
+	Headers   map[string][]string
+	Body      string
+	Timestamp time.Time
+}
+
+// Config holds configuration options for MockServer
+type Config struct {
+	UnmatchedStatusCode    int    // Status code for unmatched requests (default: 418)
+	UnmatchedStatusMessage string // Status message for unmatched requests (default: "Unmatched Request")
+	LogUnmatched           bool   // Whether to log unmatched requests (default: true)
+	MaxBodySize            int64  // Maximum request body size in bytes (default: 10MB)
+	VerboseLogging         bool   // Enable verbose request/response logging (default: false)
+}
+
+// ExpectationError represents errors related to unmet expectations
+type ExpectationError struct {
+	Message string
+	Details []string
+}
+
+// mockRoundTripper allows http.Client to route through the mock server.
+type mockRoundTripper struct {
+	server *MockServer
 }

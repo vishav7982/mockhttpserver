@@ -240,6 +240,13 @@ func (e *Expectation) getCurrentResponse() *ResponseDefinition {
 	return &e.Responses[e.CreateResponseIndex]
 }
 
+// SimulateTimeout sets the Timeout to true for this expectation.
+// Example: .SimulateTimeout()
+func (e *Expectation) SimulateTimeout() *Expectation {
+	e.getCurrentResponse().TimeoutSimulation = true
+	return e
+}
+
 // AndRespondWith sets the response body and status code for the current response.
 func (e *Expectation) AndRespondWith(body []byte, statusCode int) *Expectation {
 	if statusCode == 0 {

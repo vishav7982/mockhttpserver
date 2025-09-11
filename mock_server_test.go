@@ -1253,3 +1253,127 @@ func TestMockServer_DelayedSequentialResponse(t *testing.T) {
 		t.Errorf("second response delayed unexpectedly, elapsed %v", elapsed2)
 	}
 }
+
+// TestMockServer_SimulateTimeout verifies that an expectation can simulate
+// a server timeout without affecting other requests.
+func TestMockServer_SimulateTimeout(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	// Timeout expectation
+	timeoutExp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/timeout").
+		SimulateTimeout()
+	ms.AddExpectation(timeoutExp)
+
+	// Normal expectation
+	normalExp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/normal").
+		AndRespondWithString("ok", 200)
+	ms.AddExpectation(normalExp)
+
+	// Test normal request works
+	resp, err := http.Get(ms.URL() + "/normal")
+	if err != nil {
+		t.Fatalf("unexpected error for normal request: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "ok" {
+		t.Errorf("expected body 'ok', got %q", string(body))
+	}
+
+	// Test timeout request
+	client := &http.Client{
+		Timeout: 100 * time.Millisecond, // client timeout
+	}
+	start := time.Now()
+	_, err = client.Get(ms.URL() + "/timeout")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Errorf("expected timeout error, got none")
+	} else if !strings.Contains(err.Error(), "Client.Timeout") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+
+	if elapsed < 100*time.Millisecond {
+		t.Errorf("request returned too quickly, expected to wait ~100ms, got %v", elapsed)
+	}
+}
+
+// TestMockServer_SequentialWithDelayAndTimeout verifies sequential responses
+// including delayed responses and a simulated timeout (blocked response).
+func TestMockServer_SequentialWithDelayAndTimeout(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/seq-delay-timeout")
+
+	// 1st response: quick response
+	e.AndRespondWithString("first", 200).
+		WithResponseHeader("X-Step", "1")
+
+	// 2nd response: delayed 50ms
+	e.NextResponse().
+		AndRespondWithString("second", 201).
+		WithResponseHeader("X-Step", "2").
+		WithResponseDelay(50 * time.Millisecond)
+
+	// 3rd response: simulate timeout (blocked indefinitely)
+	e.NextResponse().
+		SimulateTimeout()
+
+	ms.AddExpectation(e)
+
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+
+	// 1st request → immediate response
+	resp1, err := client.Get(ms.URL() + "/seq-delay-timeout")
+	if err != nil {
+		t.Fatalf("unexpected error on first request: %v", err)
+	}
+	defer safeClose(t, resp1.Body)
+	body1, _ := io.ReadAll(resp1.Body)
+	if string(body1) != "first" || resp1.StatusCode != 200 || resp1.Header.Get("X-Step") != "1" {
+		t.Errorf("first response mismatch, got body=%q, status=%d, header=%s",
+			string(body1), resp1.StatusCode, resp1.Header.Get("X-Step"))
+	}
+
+	// 2nd request → delayed response (~50ms)
+	start2 := time.Now()
+	resp2, err := client.Get(ms.URL() + "/seq-delay-timeout")
+	if err != nil {
+		t.Fatalf("unexpected error on second request: %v", err)
+	}
+	defer safeClose(t, resp2.Body)
+	body2, _ := io.ReadAll(resp2.Body)
+	elapsed2 := time.Since(start2)
+	if string(body2) != "second" || resp2.StatusCode != 201 || resp2.Header.Get("X-Step") != "2" {
+		t.Errorf("second response mismatch, got body=%q, status=%d, header=%s",
+			string(body2), resp2.StatusCode, resp2.Header.Get("X-Step"))
+	}
+	if elapsed2 < 50*time.Millisecond {
+		t.Errorf("expected at least 50ms delay, got %v", elapsed2)
+	}
+
+	// 3rd request → should block and hit client timeout (~100ms)
+	start3 := time.Now()
+	_, err = client.Get(ms.URL() + "/seq-delay-timeout")
+	elapsed3 := time.Since(start3)
+
+	if err == nil {
+		t.Errorf("expected timeout error on third request, got none")
+	} else if !strings.Contains(err.Error(), "Client.Timeout") &&
+		!strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+
+	if elapsed3 < 90*time.Millisecond {
+		t.Errorf("third request returned too quickly, expected ~100ms wait, got %v", elapsed3)
+	}
+}
