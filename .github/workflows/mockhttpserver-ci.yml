@@ -46,13 +46,17 @@ jobs:
         with:
           name: coverage-report
           path: coverage.out
+          
       # 6a. Upload coverage to Codecov
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           files: coverage.out
           fail_ci_if_error: true
-      # 7. Run linter
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+        # 7. Run linter
       - name: Run GolangCI-Lint
         uses: golangci/golangci-lint-action@v6
         with:
