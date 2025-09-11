@@ -40,7 +40,7 @@ body, _ := io.ReadAll(resp.Body)
 
 fmt.Println(string(body)) // {"message":"pong"}
 ```
-### Minamal Integration Example 
+### Minimal Integration Example 
 Here’s a **minimal, end-to-end** example to get you started quickly:
 ```go
 package main
@@ -160,6 +160,7 @@ ms.AddExpectation(e)
 ## Contributing
 
 Contributions are welcome! 🎉 See [CONTRIBUTION.md](./CONTRIBUTING.md) for more details.
+
 
 
 
