@@ -68,7 +68,7 @@ func TestWithRequestBody(t *testing.T) {
 }
 
 func TestWithRequestJSONBody(t *testing.T) {
-	e, _ := NewExpectation().
+	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
 		WithRequestJSONBody(`{"id":1,"name":"test"}`)
@@ -80,7 +80,7 @@ func TestWithRequestJSONBody(t *testing.T) {
 }
 
 func TestWithPartialJSONBody(t *testing.T) {
-	e, _ := NewExpectation().
+	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
 		WithPartialJSONBody(`{"name":"test"}`)
@@ -119,11 +119,11 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 	})
 	defer ms.Close()
 
-	exp, _ := NewExpectation().
+	exp := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/login").
 		WithRequestBodyFromFile(reqFile)
-	exp, _ = exp.AndRespondFromFile(resFile, 200)
+	exp = exp.AndRespondFromFile(resFile, 200)
 	ms.AddExpectation(exp)
 
 	reqBody, _ := os.ReadFile(reqFile)
@@ -292,7 +292,7 @@ func TestQueryParamMismatch(t *testing.T) {
 }
 
 func TestJSONBodyMismatch(t *testing.T) {
-	e, _ := NewExpectation().
+	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
 		WithRequestJSONBody(`{"id":1}`)
@@ -304,7 +304,7 @@ func TestJSONBodyMismatch(t *testing.T) {
 }
 
 func TestPartialJSONBodyMismatch(t *testing.T) {
-	e, _ := NewExpectation().
+	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
 		WithPartialJSONBody(`{"name":"x"}`)
@@ -340,17 +340,27 @@ func TestCustomBodyMatcherFalse(t *testing.T) {
 }
 
 func TestResponseFromFileInvalid(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("expected panic when response file does not exist")
+		} else {
+			t.Logf("caught expected panic: %v", r)
+		}
+	}()
+
 	e := NewExpectation()
-	_, err := e.AndRespondFromFile("nonexistent-file.json", 200)
-	if err == nil {
-		t.Errorf("expected error when response file does not exist")
-	}
+	e.AndRespondFromFile("nonexistent-file.json", 200) // should panic
 }
 
 func TestRequestBodyFromFileInvalid(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("expected panic when request file does not exist")
+		} else {
+			t.Logf("caught expected panic: %v", r)
+		}
+	}()
+
 	e := NewExpectation()
-	_, err := e.WithRequestBodyFromFile("nonexistent-file.json")
-	if err == nil {
-		t.Errorf("expected error when request file does not exist")
-	}
+	e.WithRequestBodyFromFile("nonexistent-file.json") // should panic
 }

@@ -1,6 +1,12 @@
 package mockhttpserver
 
-import "regexp"
+import (
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"sync"
+)
 
 // ResponseDefinition defines a mock response for an expectation.
 type ResponseDefinition struct {
@@ -30,4 +36,15 @@ type Expectation struct {
 	InvocationCount   int
 	MaxCalls          *int // nil means unlimited
 	NextResponseIndex int  // tracks which response to return next
+}
+
+// MockServer represents a lightweight HTTP mock server for testing HTTP clients.
+type MockServer struct {
+	server             *httptest.Server
+	expectations       []*Expectation
+	unmatchedRequests  []UnmatchedRequest
+	mu                 sync.RWMutex
+	logger             *log.Logger
+	config             Config
+	unmatchedResponder func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest)
 }

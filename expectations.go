@@ -135,23 +135,23 @@ func (e *Expectation) WithRequestBodyString(body string) *Expectation {
 
 // WithRequestBodyFromFile sets the expected request body from a file.
 // Supports any file type (JSON, binary, text).
-func (e *Expectation) WithRequestBodyFromFile(filepath string) (*Expectation, error) {
+func (e *Expectation) WithRequestBodyFromFile(filepath string) *Expectation {
 	data, err := os.ReadFile(filepath)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read file %q: %w", filepath, err)
+		panic(fmt.Errorf("unable to read file %q: %w", filepath, err))
 	}
 	e.Request.Body = data
 	e.Request.BodyFromFile = true
 	e.Request.BodyMatcher = nil
-	return e, nil
+	return e
 }
 
 // WithRequestJSONBody sets a JSON body matcher for this Expectation.
 // Returns error if the expected JSON is invalid.
-func (e *Expectation) WithRequestJSONBody(expected string) (*Expectation, error) {
+func (e *Expectation) WithRequestJSONBody(expected string) *Expectation {
 	var expectedJSON interface{}
 	if err := json.Unmarshal([]byte(expected), &expectedJSON); err != nil {
-		return nil, fmt.Errorf("invalid expected JSON: %w", err)
+		panic(fmt.Errorf("invalid expected JSON: %w", err))
 	}
 
 	e.Request.BodyMatcher = func(actual []byte) bool {
@@ -162,15 +162,15 @@ func (e *Expectation) WithRequestJSONBody(expected string) (*Expectation, error)
 		return reflect.DeepEqual(expectedJSON, actualJSON)
 	}
 	e.Request.Body = nil
-	return e, nil
+	return e
 }
 
 // WithPartialJSONBody sets a partial JSON body matcher.
 // Example: .WithPartialJSONBody(`{"name":"test"}`)
-func (e *Expectation) WithPartialJSONBody(expected string) (*Expectation, error) {
+func (e *Expectation) WithPartialJSONBody(expected string) *Expectation {
 	var expectedJSON map[string]interface{}
 	if err := json.Unmarshal([]byte(expected), &expectedJSON); err != nil {
-		return nil, fmt.Errorf("invalid expected JSON: %w", err)
+		panic(fmt.Errorf("invalid expected JSON: %w", err))
 	}
 
 	e.Request.BodyMatcher = func(actual []byte) bool {
@@ -181,7 +181,7 @@ func (e *Expectation) WithPartialJSONBody(expected string) (*Expectation, error)
 		return containsAll(actualJSON, expectedJSON)
 	}
 	e.Request.Body = nil
-	return e, nil
+	return e
 }
 
 // WithRequestBodyContains sets a matcher that checks if the request body contains the given substring.
@@ -286,16 +286,16 @@ func (e *Expectation) AndRespondWithString(body string, statusCode int) *Expecta
 }
 
 // AndRespondFromFile sets the response body from a file (any type) and status code.
-func (e *Expectation) AndRespondFromFile(filePath string, statusCode int) (*Expectation, error) {
+func (e *Expectation) AndRespondFromFile(filePath string, statusCode int) *Expectation {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading file %q: %w", filePath, err)
+		panic(fmt.Errorf("error reading file %q: %w", filePath, err))
 	}
 	e.Responses = append(e.Responses, ResponseDefinition{
 		StatusCode: statusCode,
 		Body:       data,
 	})
-	return e, nil
+	return e
 }
 
 // matches checks if a request matches this expectation.

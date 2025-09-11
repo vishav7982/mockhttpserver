@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"sync"
 	"time"
 )
 
@@ -37,17 +36,6 @@ func DefaultConfig() Config {
 		MaxBodySize:            10 << 20, // 10MB
 		VerboseLogging:         false,
 	}
-}
-
-// MockServer represents a lightweight HTTP mock server for testing HTTP clients.
-type MockServer struct {
-	server             *httptest.Server
-	expectations       []*Expectation
-	unmatchedRequests  []UnmatchedRequest
-	mu                 sync.RWMutex
-	logger             *log.Logger
-	config             Config
-	unmatchedResponder func(w http.ResponseWriter, r *http.Request, req UnmatchedRequest)
 }
 
 // NewMockServer initializes a new MockServer with default configuration and logger.
