@@ -157,7 +157,7 @@ func TestMockServer_InvalidJSONBody(t *testing.T) {
 	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api")
-	e = e.WithRequestJSONBody(`{"invalid":json}`)
+	e.WithRequestJSONBody(`{"invalid":json}`)
 }
 
 // TestMockServer_PartialJSONMatching tests partial JSON body matching.
