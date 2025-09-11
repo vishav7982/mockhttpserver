@@ -181,6 +181,10 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 					exp.NextResponseIndex++
 				}
 			}
+			// Simulate delayed response.
+			if resp.Delay > 0 {
+				time.Sleep(resp.Delay)
+			}
 			// Write headers
 			for key, value := range resp.Headers {
 				w.Header().Set(key, value)

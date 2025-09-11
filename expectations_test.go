@@ -83,7 +83,7 @@ func TestWithPartialJSONBody(t *testing.T) {
 	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
-		WithPartialJSONBody(`{"name":"test"}`)
+		WithRequestPartialJSONBody(`{"name":"test"}`)
 
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if !e.matches(r, []byte(`{"name":"test","age":30}`)) {
@@ -307,7 +307,7 @@ func TestPartialJSONBodyMismatch(t *testing.T) {
 	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
-		WithPartialJSONBody(`{"name":"x"}`)
+		WithRequestPartialJSONBody(`{"name":"x"}`)
 
 	r, _ := http.NewRequest("POST", "/api", nil)
 	if e.matches(r, []byte(`{"age":20}`)) {
@@ -363,4 +363,138 @@ func TestRequestBodyFromFileInvalid(t *testing.T) {
 
 	e := NewExpectation()
 	e.WithRequestBodyFromFile("nonexistent-file.json") // should panic
+}
+
+func TestSequentialResponses(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/api/test")
+
+	// First response
+	e.AndRespondWithString("first", 200).
+		WithResponseHeader("X-Test", "one")
+
+	// Move to second response
+	e.NextResponse().
+		AndRespondWithString("second", 201).
+		WithResponseHeader("X-Test", "two")
+
+	// Move to third response
+	e.NextResponse().
+		AndRespondWithString("third", 202).
+		WithResponseHeader("X-Test", "three")
+
+	// Verify the responses
+	if len(e.Responses) != 3 {
+		t.Fatalf("expected 3 responses, got %d", len(e.Responses))
+	}
+
+	tests := []struct {
+		idx        int
+		body       string
+		statusCode int
+		headerVal  string
+	}{
+		{0, "first", 200, "one"},
+		{1, "second", 201, "two"},
+		{2, "third", 202, "three"},
+	}
+
+	for _, tt := range tests {
+		resp := e.Responses[tt.idx]
+		if string(resp.Body) != tt.body {
+			t.Errorf("response %d: expected body %q, got %q", tt.idx, tt.body, string(resp.Body))
+		}
+		if resp.StatusCode != tt.statusCode {
+			t.Errorf("response %d: expected status %d, got %d", tt.idx, tt.statusCode, resp.StatusCode)
+		}
+		if resp.Headers["X-Test"] != tt.headerVal {
+			t.Errorf("response %d: expected header %q, got %q", tt.idx, tt.headerVal, resp.Headers["X-Test"])
+		}
+	}
+}
+
+// TestExpectation_ExactPathMatch verifies exact path matching when no pattern is provided.
+func TestExpectation_ExactPathMatch(t *testing.T) {
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/exact-path") // no pattern, exact match
+
+	tests := []struct {
+		reqPath string
+		want    bool
+	}{
+		{"/exact-path", true},   // matches exactly
+		{"/exact-path/", false}, // does not match
+		{"/other-path", false},  // does not match
+	}
+
+	for i, tt := range tests {
+		req, _ := http.NewRequest("GET", tt.reqPath, nil)
+		got := e.matches(req, nil)
+		if got != tt.want {
+			t.Errorf("test %d: path %q, expected %v, got %v", i+1, tt.reqPath, tt.want, got)
+		}
+	}
+}
+
+// TestContainsAll verifies that containsAll correctly matches nested JSON structures.
+func TestContainsAll(t *testing.T) {
+	tests := []struct {
+		actual   map[string]interface{}
+		expected map[string]interface{}
+		want     bool
+	}{
+		// Simple flat match
+		{
+			actual:   map[string]interface{}{"a": 1, "b": 2},
+			expected: map[string]interface{}{"a": 1},
+			want:     true,
+		},
+		// Nested map match
+		{
+			actual: map[string]interface{}{
+				"a": 1,
+				"b": map[string]interface{}{
+					"x": 10,
+					"y": 20,
+				},
+			},
+			expected: map[string]interface{}{
+				"b": map[string]interface{}{
+					"x": 10,
+				},
+			},
+			want: true,
+		},
+		// Nested map mismatch
+		{
+			actual: map[string]interface{}{
+				"a": 1,
+				"b": map[string]interface{}{
+					"x": 10,
+					"y": 20,
+				},
+			},
+			expected: map[string]interface{}{
+				"b": map[string]interface{}{
+					"x": 99, // mismatch
+				},
+			},
+			want: false,
+		},
+		// Key missing in actual
+		{
+			actual:   map[string]interface{}{"a": 1},
+			expected: map[string]interface{}{"b": 2},
+			want:     false,
+		},
+	}
+
+	for i, tt := range tests {
+		got := containsAll(tt.actual, tt.expected)
+		if got != tt.want {
+			t.Errorf("test %d: expected %v, got %v", i+1, tt.want, got)
+		}
+	}
 }

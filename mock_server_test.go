@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // safeClose safely closes response body and logs error if any.
@@ -168,7 +169,7 @@ func TestMockServer_PartialJSONMatching(t *testing.T) {
 	e := NewExpectation().
 		WithRequestMethod("POST").
 		WithPath("/api").
-		WithPartialJSONBody(`{"name":"test"}`)
+		WithRequestPartialJSONBody(`{"name":"test"}`)
 
 	ms.AddExpectation(e.AndRespondWithString("matched", 200))
 
@@ -423,8 +424,10 @@ func TestMockServer_MultipleResponsesWithHeaders(t *testing.T) {
 		WithPath("/multi-seq").
 		WithResponseHeader("X-Step", "1").
 		AndRespondWithString(`{"step":"one"}`, 200).
+		NextResponse().
 		WithResponseHeader("X-Step", "2").
 		AndRespondWithString(`{"step":"two"}`, 201).
+		NextResponse().
 		WithResponseHeader("X-Step", "3").
 		AndRespondWithString(`{"step":"three"}`, 202)
 
@@ -440,31 +443,30 @@ func TestMockServer_MultipleResponsesWithHeaders(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		return string(body), resp.StatusCode, resp.Header.Get("X-Step")
 	}
-	fmt.Println(ms.expectations)
-	// 1st request → first response
-	body, status, header := doGet()
-	if body != `{"step":"one"}` || status != 200 || header != "1" {
-		t.Errorf("expected first response with header 1, got body=%q, status=%d, header=%s", body, status, header)
+
+	// Sequential requests and expectations
+	tests := []struct {
+		body   string
+		status int
+		header string
+	}{
+		{`{"step":"one"}`, 200, "1"},
+		{`{"step":"two"}`, 201, "2"},
+		{`{"step":"three"}`, 202, "3"},
+		{`{"step":"three"}`, 202, "3"}, // last response repeats
 	}
 
-	// 2nd request → second response
-	body, status, header = doGet()
-	if body != `{"step":"two"}` || status != 201 || header != "2" {
-		t.Errorf("expected second response with header 2, got body=%q, status=%d, header=%s", body, status, header)
-	}
-
-	// 3rd request → third response
-	body, status, header = doGet()
-	if body != `{"step":"three"}` || status != 202 || header != "3" {
-		t.Errorf("expected third response with header 3, got body=%q, status=%d, header=%s", body, status, header)
-	}
-
-	// 4th request → should repeat last response
-	body, status, header = doGet()
-	if body != `{"step":"three"}` || status != 202 || header != "3" {
-		t.Errorf("expected last response to repeat with header 3, got body=%q, status=%d, header=%s", body, status, header)
+	for i, tt := range tests {
+		body, status, header := doGet()
+		if body != tt.body || status != tt.status || header != tt.header {
+			t.Errorf("request %d: expected body=%q, status=%d, header=%q, got body=%q, status=%d, header=%q",
+				i+1, tt.body, tt.status, tt.header, body, status, header)
+		}
 	}
 }
+
+// TestExpectation_MultipleHeadersAndResponses verifies that multiple responses
+// can have multiple headers and are returned in sequence correctly.
 func TestExpectation_MultipleHeadersAndResponses(t *testing.T) {
 	ms := NewMockServer()
 	defer ms.Close()
@@ -475,8 +477,10 @@ func TestExpectation_MultipleHeadersAndResponses(t *testing.T) {
 		WithPath("/multi-seq").
 		WithResponseHeader("X-Step", "1").
 		AndRespondWithString(`{"step":"one"}`, 200).
+		NextResponse().
 		WithResponseHeader("X-Step", "2").
 		AndRespondWithString(`{"step":"two"}`, 201).
+		NextResponse().
 		WithResponseHeaders(map[string]string{
 			"X-Step":   "3",
 			"X-Custom": "yes",
@@ -485,36 +489,39 @@ func TestExpectation_MultipleHeadersAndResponses(t *testing.T) {
 
 	ms.AddExpectation(e)
 
-	// First request
-	resp1, _ := http.Get(ms.URL() + "/multi-seq")
-	defer safeClose(t, resp1.Body)
-	body1, _ := io.ReadAll(resp1.Body)
-	if string(body1) != `{"step":"one"}` || resp1.StatusCode != 200 || resp1.Header.Get("X-Step") != "1" {
-		t.Errorf("first response mismatch, got body=%s, status=%d, header=%s", string(body1), resp1.StatusCode, resp1.Header.Get("X-Step"))
+	// Helper to GET response and body
+	doGet := func() (*http.Response, []byte) {
+		resp, err := http.Get(ms.URL() + "/multi-seq")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		defer safeClose(t, resp.Body)
+		return resp, body
 	}
 
-	// Second request
-	resp2, _ := http.Get(ms.URL() + "/multi-seq")
-	defer safeClose(t, resp2.Body)
-	body2, _ := io.ReadAll(resp2.Body)
-	if string(body2) != `{"step":"two"}` || resp2.StatusCode != 201 || resp2.Header.Get("X-Step") != "2" {
-		t.Errorf("second response mismatch, got body=%s, status=%d, header=%s", string(body2), resp2.StatusCode, resp2.Header.Get("X-Step"))
+	tests := []struct {
+		status  int
+		body    string
+		headers map[string]string
+	}{
+		{200, `{"step":"one"}`, map[string]string{"X-Step": "1"}},
+		{201, `{"step":"two"}`, map[string]string{"X-Step": "2"}},
+		{202, `{"step":"three"}`, map[string]string{"X-Step": "3", "X-Custom": "yes"}},
+		{202, `{"step":"three"}`, map[string]string{"X-Step": "3", "X-Custom": "yes"}}, // repeat last
 	}
 
-	// Third request
-	resp3, _ := http.Get(ms.URL() + "/multi-seq")
-	defer safeClose(t, resp3.Body)
-	body3, _ := io.ReadAll(resp3.Body)
-	if string(body3) != `{"step":"three"}` || resp3.StatusCode != 202 || resp3.Header.Get("X-Step") != "3" || resp3.Header.Get("X-Custom") != "yes" {
-		t.Errorf("third response mismatch, got body=%s, status=%d, headers=%v", string(body3), resp3.StatusCode, resp3.Header)
-	}
-
-	// Fourth request (repeat last response)
-	resp4, _ := http.Get(ms.URL() + "/multi-seq")
-	defer safeClose(t, resp4.Body)
-	body4, _ := io.ReadAll(resp4.Body)
-	if string(body4) != `{"step":"three"}` || resp4.StatusCode != 202 || resp4.Header.Get("X-Step") != "3" || resp4.Header.Get("X-Custom") != "yes" {
-		t.Errorf("fourth response mismatch, got body=%s, status=%d, headers=%v", string(body4), resp4.StatusCode, resp4.Header)
+	for i, tt := range tests {
+		resp, body := doGet()
+		if string(body) != tt.body || resp.StatusCode != tt.status {
+			t.Errorf("request %d: expected body=%q, status=%d, got body=%q, status=%d",
+				i+1, tt.body, tt.status, string(body), resp.StatusCode)
+		}
+		for k, v := range tt.headers {
+			if resp.Header.Get(k) != v {
+				t.Errorf("request %d: expected header %s=%q, got %q", i+1, k, v, resp.Header.Get(k))
+			}
+		}
 	}
 }
 
@@ -799,7 +806,9 @@ func TestExpectation_LongSequentialResponses(t *testing.T) {
 		WithRequestMethod("GET").
 		WithPath("/long-seq").
 		AndRespondWithString("one", 200).
+		NextResponse().
 		AndRespondWithString("two", 201).
+		NextResponse().
 		AndRespondWithString("three", 202)
 
 	ms.AddExpectation(e)
@@ -1078,5 +1087,169 @@ func TestMockServer_LoggerAndVerbose(t *testing.T) {
 	ms.ClearUnmatchedRequests()
 	if len(ms.GetUnmatchedRequests()) != 0 {
 		t.Error("expected unmatched requests to be cleared")
+	}
+}
+
+// TestMockServer_ResponseDelay verifies that response delays are respected.
+func TestMockServer_ResponseDelay(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/delayed").
+		AndRespondWithString("fast", 200).
+		NextResponse().
+		AndRespondWithString("slow", 200).
+		WithResponseDelay(500 * time.Millisecond) // 0.5-second delay
+
+	ms.AddExpectation(e)
+
+	// Helper to measure response duration
+	doGet := func() (string, time.Duration) {
+		start := time.Now()
+		resp, err := http.Get(ms.URL() + "/delayed")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer safeClose(t, resp.Body)
+		body, _ := io.ReadAll(resp.Body)
+		return string(body), time.Since(start)
+	}
+
+	// First response → no delay
+	body, duration := doGet()
+	if body != "fast" {
+		t.Errorf("expected first response body 'fast', got %q", body)
+	}
+	if duration >= 100*time.Millisecond {
+		t.Errorf("expected first response to be fast, took %v", duration)
+	}
+
+	// Second response → delayed
+	body, duration = doGet()
+	if body != "slow" {
+		t.Errorf("expected second response body 'slow', got %q", body)
+	}
+	if duration < 500*time.Millisecond {
+		t.Errorf("expected delay of at least 500ms, took %v", duration)
+	}
+
+	// Third response → repeats last delayed response
+	body, duration = doGet()
+	if body != "slow" {
+		t.Errorf("expected third response body 'slow', got %q", body)
+	}
+	if duration < 500*time.Millisecond {
+		t.Errorf("expected delay of at least 500ms, took %v", duration)
+	}
+}
+
+// TestMockServer_DelayedResponseDoesNotBlock verifies that a delayed response
+// for one request does not block other requests from being served.
+func TestMockServer_DelayedResponseDoesNotBlock(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	// Expectation with delay
+	delay := 1000 * time.Millisecond
+	e1 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/delayed").
+		AndRespondWithString("delayed", 200).
+		WithResponseDelay(delay)
+	ms.AddExpectation(e1)
+
+	// Another expectation with no delay
+	e2 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/fast").
+		AndRespondWithString("fast", 200)
+	ms.AddExpectation(e2)
+
+	start := time.Now()
+
+	// Fire both requests concurrently
+	var body1, body2 string
+	done := make(chan struct{})
+	go func() {
+		resp, _ := http.Get(ms.URL() + "/delayed")
+		defer safeClose(t, resp.Body)
+		b, _ := io.ReadAll(resp.Body)
+		body1 = string(b)
+		done <- struct{}{}
+	}()
+
+	go func() {
+		resp, _ := http.Get(ms.URL() + "/fast")
+		defer safeClose(t, resp.Body)
+		b, _ := io.ReadAll(resp.Body)
+		body2 = string(b)
+		done <- struct{}{}
+	}()
+
+	// Wait for both requests
+	<-done
+	<-done
+	elapsed := time.Since(start)
+
+	// Validate responses
+	if body1 != "delayed" || body2 != "fast" {
+		t.Errorf("unexpected response bodies: delayed=%q, fast=%q", body1, body2)
+	}
+
+	// Validate that fast request was not blocked by delayed one
+	if elapsed < delay {
+		t.Errorf("expected total elapsed time >= %v, got %v", delay, elapsed)
+	}
+}
+
+// TestMockServer_DelayedSequentialResponse verifies that sequential responses
+// for the same request wait for their own delay and are returned in order.
+func TestMockServer_DelayedSequentialResponse(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	e := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/sequential-delay").
+		// First response delayed
+		AndRespondWithString("first", 200).
+		WithResponseDelay(300*time.Millisecond).
+		NextResponse().
+		AndRespondWithString("second", 200)
+
+	ms.AddExpectation(e)
+
+	start := time.Now()
+	resp1, err := http.Get(ms.URL() + "/sequential-delay")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp1.Body)
+	body1, _ := io.ReadAll(resp1.Body)
+	elapsed1 := time.Since(start)
+
+	if string(body1) != "first" {
+		t.Errorf("expected 'first', got %q", string(body1))
+	}
+	if elapsed1 < 300*time.Millisecond {
+		t.Errorf("first response returned too early, elapsed %v", elapsed1)
+	}
+
+	start = time.Now()
+	resp2, err := http.Get(ms.URL() + "/sequential-delay")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp2.Body)
+	body2, _ := io.ReadAll(resp2.Body)
+	elapsed2 := time.Since(start)
+
+	if string(body2) != "second" {
+		t.Errorf("expected 'second', got %q", string(body2))
+	}
+	if elapsed2 > 50*time.Millisecond {
+		t.Errorf("second response delayed unexpectedly, elapsed %v", elapsed2)
 	}
 }

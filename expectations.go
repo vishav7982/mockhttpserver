@@ -8,14 +8,13 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // NewExpectation creates a new default Expectation.
 func NewExpectation() *Expectation {
 	return &Expectation{
-		Request: RequestExpectation{
-			Headers: make(map[string]string),
-		},
+		Request:           RequestExpectation{},
 		Responses:         []ResponseDefinition{},
 		NextResponseIndex: 0,
 		InvocationCount:   0,
@@ -67,7 +66,7 @@ func (e *Expectation) WithPathVariables(vars map[string]string) *Expectation {
 
 func convertBracesToRegex(pattern string) string {
 	// Replace {var} with (?P<var>[^/]+)
-	re := regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+	re := regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)}`)
 	result := re.ReplaceAllString(pattern, `(?P<$1>[^/]+)`)
 	return "^" + result + "$"
 }
@@ -165,9 +164,9 @@ func (e *Expectation) WithRequestJSONBody(expected string) *Expectation {
 	return e
 }
 
-// WithPartialJSONBody sets a partial JSON body matcher.
-// Example: .WithPartialJSONBody(`{"name":"test"}`)
-func (e *Expectation) WithPartialJSONBody(expected string) *Expectation {
+// WithRequestPartialJSONBody sets a partial JSON body matcher.
+// Example: .WithRequestPartialJSONBody(`{"name":"test"}`)
+func (e *Expectation) WithRequestPartialJSONBody(expected string) *Expectation {
 	var expectedJSON map[string]interface{}
 	if err := json.Unmarshal([]byte(expected), &expectedJSON); err != nil {
 		panic(fmt.Errorf("invalid expected JSON: %w", err))
@@ -217,66 +216,38 @@ func (e *Expectation) InvocationCounter() int {
 	return e.InvocationCount
 }
 
-// WithResponseHeader sets a response header for the last response or creates a new one if needed.
-func (e *Expectation) WithResponseHeader(key, value string) *Expectation {
-	var resp *ResponseDefinition
-
-	if len(e.Responses) == 0 || (len(e.Responses) > 0 && len(e.Responses[len(e.Responses)-1].Body) > 0) {
-		// No responses yet, or last one already has a body → create a new response
+// NextResponse explicitly moves to the next response in sequence.
+// If no response exists, it creates a new one.
+func (e *Expectation) NextResponse() *Expectation {
+	e.CreateResponseIndex++
+	if len(e.Responses) <= e.CreateResponseIndex {
 		e.Responses = append(e.Responses, ResponseDefinition{
 			Headers:    make(map[string]string),
-			StatusCode: http.StatusOK, // default
+			StatusCode: http.StatusOK,
 		})
-	}
-
-	resp = &e.Responses[len(e.Responses)-1]
-	if resp.Headers == nil {
-		resp.Headers = make(map[string]string)
-	}
-	resp.Headers[key] = value
-	return e
-}
-
-// WithResponseHeaders sets multiple response headers at once.
-func (e *Expectation) WithResponseHeaders(headers map[string]string) *Expectation {
-	if len(e.Responses) == 0 || (len(e.Responses) > 0 && len(e.Responses[len(e.Responses)-1].Body) > 0) {
-		// No responses yet or last response has a body → create a new one
-		e.Responses = append(e.Responses, ResponseDefinition{
-			Headers:    make(map[string]string),
-			StatusCode: http.StatusOK, // default
-		})
-	}
-
-	last := &e.Responses[len(e.Responses)-1]
-	if last.Headers == nil {
-		last.Headers = make(map[string]string)
-	}
-	for k, v := range headers {
-		last.Headers[k] = v
 	}
 	return e
 }
 
-// AndRespondWith sets the response body and status code, updating last response if possible.
+// getCurrentResponse returns the current response to modify, creating one if needed
+func (e *Expectation) getCurrentResponse() *ResponseDefinition {
+	if len(e.Responses) == 0 {
+		e.Responses = append(e.Responses, ResponseDefinition{
+			Headers:    make(map[string]string),
+			StatusCode: http.StatusOK,
+		})
+	}
+	return &e.Responses[e.CreateResponseIndex]
+}
+
+// AndRespondWith sets the response body and status code for the current response.
 func (e *Expectation) AndRespondWith(body []byte, statusCode int) *Expectation {
 	if statusCode == 0 {
 		statusCode = http.StatusOK
 	}
-
-	if len(e.Responses) == 0 || (len(e.Responses) > 0 && len(e.Responses[len(e.Responses)-1].Body) > 0) {
-		// No responses yet or last response already has a body → create a new response
-		e.Responses = append(e.Responses, ResponseDefinition{
-			Headers:    make(map[string]string),
-			Body:       body,
-			StatusCode: statusCode,
-		})
-		return e
-	}
-
-	// Fill the last response (was created via WithResponseHeader)
-	last := &e.Responses[len(e.Responses)-1]
-	last.Body = body
-	last.StatusCode = statusCode
+	resp := e.getCurrentResponse()
+	resp.Body = body
+	resp.StatusCode = statusCode
 	return e
 }
 
@@ -285,16 +256,44 @@ func (e *Expectation) AndRespondWithString(body string, statusCode int) *Expecta
 	return e.AndRespondWith([]byte(body), statusCode)
 }
 
-// AndRespondFromFile sets the response body from a file (any type) and status code.
+// AndRespondFromFile sets the response body from a file and status code for the current response.
 func (e *Expectation) AndRespondFromFile(filePath string, statusCode int) *Expectation {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		panic(fmt.Errorf("error reading file %q: %w", filePath, err))
 	}
-	e.Responses = append(e.Responses, ResponseDefinition{
-		StatusCode: statusCode,
-		Body:       data,
-	})
+	resp := e.getCurrentResponse()
+	resp.Body = data
+	resp.StatusCode = statusCode
+	return e
+}
+
+// WithResponseHeader sets a header for the current response
+func (e *Expectation) WithResponseHeader(key, value string) *Expectation {
+	resp := e.getCurrentResponse()
+	if resp.Headers == nil {
+		resp.Headers = make(map[string]string)
+	}
+	resp.Headers[key] = value
+	return e
+}
+
+// WithResponseHeaders sets multiple headers for the current response
+func (e *Expectation) WithResponseHeaders(headers map[string]string) *Expectation {
+	resp := e.getCurrentResponse()
+	if resp.Headers == nil {
+		resp.Headers = make(map[string]string)
+	}
+	for k, v := range headers {
+		resp.Headers[k] = v
+	}
+	return e
+}
+
+// WithResponseDelay sets a delay for the current response
+func (e *Expectation) WithResponseDelay(d time.Duration) *Expectation {
+	resp := e.getCurrentResponse()
+	resp.Delay = d
 	return e
 }
 
@@ -331,9 +330,6 @@ func (e *Expectation) matches(r *http.Request, body []byte) bool {
 				return false
 			}
 		}
-	} else if r.URL.Path != e.Request.Path {
-		// Exact path match if no pattern provided
-		return false
 	}
 	// --- Query Parameter Matching ---
 	if len(e.Request.QueryParams) > 0 {

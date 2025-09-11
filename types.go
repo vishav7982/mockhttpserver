@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"sync"
+	"time"
 )
 
 // ResponseDefinition defines a mock response for an expectation.
@@ -13,6 +14,7 @@ type ResponseDefinition struct {
 	StatusCode int
 	Body       []byte
 	Headers    map[string]string
+	Delay      time.Duration // optional delay before sending response
 }
 
 // RequestExpectation defines the expected request structure.
@@ -31,11 +33,12 @@ type RequestExpectation struct {
 // Expectation defines a mock expectation for HTTP requests.
 // It contains the expected request and one or more sequential responses.
 type Expectation struct {
-	Request           RequestExpectation
-	Responses         []ResponseDefinition
-	InvocationCount   int
-	MaxCalls          *int // nil means unlimited
-	NextResponseIndex int  // tracks which response to return next
+	Request             RequestExpectation
+	Responses           []ResponseDefinition
+	CreateResponseIndex int
+	InvocationCount     int
+	MaxCalls            *int // nil means unlimited
+	NextResponseIndex   int  // tracks which response to return next
 }
 
 // MockServer represents a lightweight HTTP mock server for testing HTTP clients.
