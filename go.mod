@@ -1,3 +1,3 @@
-module github.com/vishav7982/mockhttpserver
+module github.com/vishav7982/moxy
 
 go 1.22

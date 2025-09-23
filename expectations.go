@@ -1,4 +1,4 @@
-package mockhttpserver
+package moxy
 
 import (
 	"encoding/json"

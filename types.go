@@ -1,12 +1,22 @@
-package mockhttpserver
+package moxy
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"sync"
 	"time"
+)
+
+// Protocol type
+type Protocol string
+
+const (
+	HTTP  Protocol = "http"
+	HTTPS Protocol = "https"
 )
 
 // ResponseDefinition defines a mock response for an expectation.
@@ -64,11 +74,13 @@ type UnmatchedRequest struct {
 
 // Config holds configuration options for MockServer
 type Config struct {
-	UnmatchedStatusCode    int    // Status code for unmatched requests (default: 418)
-	UnmatchedStatusMessage string // Status message for unmatched requests (default: "Unmatched Request")
-	LogUnmatched           bool   // Whether to log unmatched requests (default: true)
-	MaxBodySize            int64  // Maximum request body size in bytes (default: 10MB)
-	VerboseLogging         bool   // Enable verbose request/response logging (default: false)
+	Protocol               Protocol    // HTTP or HTTPS
+	TLSConfig              *TLSOptions // Server's custom TLS config
+	UnmatchedStatusCode    int         // Status code for unmatched requests (default: 418)
+	UnmatchedStatusMessage string      // Status message for unmatched requests (default: "Unmatched Request")
+	LogUnmatched           bool        // Whether to log unmatched requests (default: true)
+	MaxBodySize            int64       // Maximum request body size in bytes (default: 10MB)
+	VerboseLogging         bool        // Enable verbose request/response logging (default: false)
 }
 
 // ExpectationError represents errors related to unmet expectations
@@ -77,7 +89,18 @@ type ExpectationError struct {
 	Details []string
 }
 
-// mockRoundTripper allows http.Client to route through the mock server.
-type mockRoundTripper struct {
-	server *MockServer
+// TLSOptions for our mock https server
+type TLSOptions struct {
+	// Server certificate & key (if nil, a self-signed cert is generated)
+	Certificates []tls.Certificate
+	// Require clients to present valid certificate
+	RequireClientCert bool
+	// Custom RootCAs for verifying client certs (if nil, system pool is used)
+	ClientCAs *x509.CertPool
+	// Skip verification of client certificates (for tests)
+	SkipClientVerify bool
+	// Skip server certificate verification on the client side (self-signed support)
+	InsecureSkipVerify bool
+	// e.g., tls.VersionTLS12
+	MinVersion uint16
 }

@@ -1,4 +1,4 @@
-name: Mock Http Server CI
+name: Moxy CI
 
 on:
   push:

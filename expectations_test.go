@@ -1,4 +1,4 @@
-package mockhttpserver
+package moxy
 
 import (
 	"bytes"

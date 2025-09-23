@@ -1,6 +1,9 @@
-package mockhttpserver
+package moxy
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -9,9 +12,10 @@ import (
 	"time"
 )
 
-// DefaultConfig returns the default configuration
+// DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
+		Protocol:               HTTP,
 		UnmatchedStatusCode:    http.StatusTeapot,
 		UnmatchedStatusMessage: "Unmatched Request",
 		LogUnmatched:           true,
@@ -31,8 +35,50 @@ func NewMockServerWithConfig(config Config) *MockServer {
 		logger: log.New(os.Stdout, "[MockServer] ", log.LstdFlags|log.Lshortfile),
 		config: config,
 	}
-	ms.server = httptest.NewServer(http.HandlerFunc(ms.handler))
+
+	if config.Protocol == HTTPS {
+		server := httptest.NewUnstartedServer(http.HandlerFunc(ms.handler))
+		server.TLS = buildTLSConfig(config.TLSConfig)
+		server.StartTLS()
+		ms.server = server
+	} else {
+		ms.server = httptest.NewServer(http.HandlerFunc(ms.handler))
+	}
 	return ms
+}
+
+// buildTLSConfig builds a *tls.Config from TLSOptions.
+func buildTLSConfig(opts *TLSOptions) *tls.Config {
+	tlsConfig := &tls.Config{}
+
+	if opts == nil {
+		tlsConfig.Certificates = []tls.Certificate{generateDefaultCert()}
+		tlsConfig.InsecureSkipVerify = true
+		return tlsConfig
+	}
+	if opts.MinVersion != 0 {
+		tlsConfig.MinVersion = opts.MinVersion
+	} else {
+		tlsConfig.MinVersion = tls.VersionTLS12 // default
+	}
+	// Server certs
+	if len(opts.Certificates) > 0 {
+		tlsConfig.Certificates = opts.Certificates
+	} else {
+		tlsConfig.Certificates = []tls.Certificate{generateDefaultCert()}
+	}
+	// mTLS configuration
+	if opts.RequireClientCert {
+		if opts.SkipClientVerify {
+			tlsConfig.ClientAuth = tls.RequireAnyClientCert
+		} else {
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+			tlsConfig.ClientCAs = opts.ClientCAs
+		}
+	}
+	// Allow skipping verification (self-signed)
+	tlsConfig.InsecureSkipVerify = opts.InsecureSkipVerify
+	return tlsConfig
 }
 
 // WithLogger allows injecting a custom logger.
@@ -205,14 +251,53 @@ func (m *MockServer) handler(w http.ResponseWriter, r *http.Request) {
 		m.unmatchedResponder(w, r, unmatched)
 		return
 	}
-
+	_ = fmt.Sprintf("Unmatched Request:\nMethod=%s\nURI=%s\nHeaders=%+v\nBody=%s\n", r.Method, r.URL.RequestURI(), r.Header, string(body))
 	http.Error(w, m.config.UnmatchedStatusMessage, m.config.UnmatchedStatusCode)
 }
 
-// Client returns an *http.Client that uses this mock server.
-func (m *MockServer) Client() *http.Client {
+// DefaultClient returns a simple *http.Client for HTTP/HTTPS testing.
+// This client:
+//   - Works for HTTP
+//   - Works for HTTPS with server certs if InsecureSkipVerify is true
+//   - DOES NOT handle mTLS; for that, create a custom client with TLS config
+func (m *MockServer) DefaultClient() *http.Client {
+	transport := &http.Transport{}
+	if m.config.Protocol == HTTPS {
+		// Simple HTTPS client
+		tlsConfig := &tls.Config{}
+		if m.config.TLSConfig != nil {
+			// Default client should always skip verification for normal HTTPS
+			// (unless explicitly required otherwise)
+			tlsConfig.InsecureSkipVerify = true
+		} else {
+			tlsConfig.InsecureSkipVerify = true
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{Transport: transport}
+}
+
+// mTLSClient returns an *http.Client configured for mutual TLS.
+// It uses the TLSOptions from the server. The caller provides client certificates and RootCAs.
+// This is useful for testing mTLS scenarios where the server verifies the client certificate.
+func (m *MockServer) mTLSClient(clientCerts []tls.Certificate, rootCAs *x509.CertPool) *http.Client {
+	tlsConfig := &tls.Config{
+		Certificates: clientCerts, // allow multiple client certs
+		RootCAs:      rootCAs,     // trust server cert
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// If the server requires client certs, ensure the client provides one
+	if m.config.TLSConfig != nil && m.config.TLSConfig.RequireClientCert {
+		tlsConfig.InsecureSkipVerify = false
+	} else {
+		tlsConfig.InsecureSkipVerify = true
+	}
+
 	return &http.Client{
-		Transport: &mockRoundTripper{server: m},
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
 	}
 }
 
@@ -220,13 +305,6 @@ func (m *MockServer) Client() *http.Client {
 func (m *MockServer) Use(middleware func(http.Handler) http.Handler) {
 	m.server.Config.Handler = middleware(m.server.Config.Handler)
 }
-
-func (rt *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.URL.Scheme = "http"
-	req.URL.Host = rt.server.server.Listener.Addr().String()
-	return http.DefaultTransport.RoundTrip(req)
-}
-
 func (e *ExpectationError) Error() string {
 	result := e.Message
 	for _, detail := range e.Details {

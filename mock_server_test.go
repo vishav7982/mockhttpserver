@@ -1,7 +1,9 @@
-package mockhttpserver
+package moxy
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,7 +72,7 @@ func TestMockServer_QueryParamsAndHeaders(t *testing.T) {
 
 	req, _ := http.NewRequest("GET", ms.URL()+"/search?q=golang", nil)
 	req.Header.Set("X-Test", "true")
-	resp, err := ms.Client().Do(req)
+	resp, err := ms.DefaultClient().Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -943,7 +945,7 @@ func TestMockServer_NilBodyRequest(t *testing.T) {
 	ms.AddExpectation(e)
 
 	req, _ := http.NewRequest("GET", ms.URL()+"/nobody", nil)
-	resp, _ := ms.Client().Do(req)
+	resp, _ := ms.DefaultClient().Do(req)
 	defer safeClose(t, resp.Body)
 
 	if resp.StatusCode != 200 {
@@ -1375,5 +1377,705 @@ func TestMockServer_SequentialWithDelayAndTimeout(t *testing.T) {
 
 	if elapsed3 < 90*time.Millisecond {
 		t.Errorf("third request returned too quickly, expected ~100ms wait, got %v", elapsed3)
+	}
+}
+
+// TestHTTPSWithDefaultClient demonstrates a simple HTTPS scenario using the
+// default mock server client (ms.Client()). This client automatically skips
+// TLS verification (InsecureSkipVerify=true), so it can connect to a server
+// with a self-signed certificate without errors. This represents internal
+// testing where trust of the server certificate is not enforced.
+func TestHTTPSWithDefaultClient(t *testing.T) {
+	// Load self-signed server certificate + key
+	serverCrtfilePath := filepath.Join("testdata", "server.crt")
+	serverKeyfilePath := filepath.Join("testdata", "server.key")
+	cert, err := tls.LoadX509KeyPair(serverCrtfilePath, serverKeyfilePath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Configure mock server with TLSOptions (HTTPS)
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{cert},
+			RequireClientCert: false, // simple HTTPS, no mTLS
+		},
+	})
+	defer server.Close()
+
+	// Add expectation for GET /simple
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/simple").
+		AndRespondWithString("ok", 200),
+	)
+
+	// Use default client (ms.DefaultClient()) which skips certificate verification
+	resp, err := server.DefaultClient().Get(server.URL() + "/simple")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPSWithCustomClient demonstrates a realistic HTTPS scenario where
+// the client verifies the server certificate. This simulates a real-world
+// case where the client only trusts specific certificates and enforces
+// TLS verification.
+func TestHTTPSWithCustomClient(t *testing.T) {
+	// Load server certificate + key
+	serverCrtfilePath := filepath.Join("testdata", "server.crt")
+	serverKeyfilePath := filepath.Join("testdata", "server.key")
+	cert, err := tls.LoadX509KeyPair(serverCrtfilePath, serverKeyfilePath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Build RootCAs for client to trust the server cert
+	certData, err := os.ReadFile(serverCrtfilePath)
+	if err != nil {
+		t.Fatalf("failed to read server.crt: %v", err)
+	}
+	rootCAs := x509.NewCertPool()
+	if ok := rootCAs.AppendCertsFromPEM(certData); !ok {
+		t.Fatal("failed to append server cert to RootCAs")
+	}
+
+	// Configure mock server with TLSOptions
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{cert},
+			RequireClientCert: false, // simple HTTPS
+		},
+	})
+	defer server.Close()
+
+	// Add expectation for GET /secure
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/secure").
+		AndRespondWithString("ok", 200),
+	)
+
+	// Create a custom client with RootCAs to verify server certificate
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: rootCAs, // verify server certificate
+			},
+		},
+	}
+
+	resp, err := client.Get(server.URL() + "/secure")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPSWithMutualTLS verifies that the mock server enforces mTLS:
+//   - Server requires client certificate signed by a trusted CA (or self-signed for test)
+//   - Client presents its certificate to authenticate
+//   - Both sides trust each other's certificates via RootCAs
+func TestHTTPSWithMutualTLS(t *testing.T) {
+	// Load server certificate + key
+	serverCrtFilePath := filepath.Join("testdata", "server.crt")
+	serverKeyFilePath := filepath.Join("testdata", "server.key")
+	serverCert, err := tls.LoadX509KeyPair(serverCrtFilePath, serverKeyFilePath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Load client certificate + key
+	clientCrtFilePath := filepath.Join("testdata", "client.crt")
+	clientKeyFilePath := filepath.Join("testdata", "client.key")
+	clientCert, err := tls.LoadX509KeyPair(clientCrtFilePath, clientKeyFilePath)
+	if err != nil {
+		t.Fatalf("failed to load client cert/key: %v", err)
+	}
+
+	// Create server trust pool (trust client cert)
+	clientCertData, err := os.ReadFile(clientCrtFilePath)
+	if err != nil {
+		t.Fatalf("failed to read client cert: %v", err)
+	}
+	clientCertPool := x509.NewCertPool()
+	if ok := clientCertPool.AppendCertsFromPEM(clientCertData); !ok {
+		t.Fatal("failed to append client cert to server trust pool")
+	}
+
+	// Create client trust pool (trust server cert)
+	serverCertData, err := os.ReadFile(serverCrtFilePath)
+	if err != nil {
+		t.Fatalf("failed to read server cert: %v", err)
+	}
+	serverCertPool := x509.NewCertPool()
+	if ok := serverCertPool.AppendCertsFromPEM(serverCertData); !ok {
+		t.Fatal("failed to append server cert to client trust pool")
+	}
+	// Configure mock server to require client cert (mTLS)
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: true,
+			ClientCAs:         clientCertPool,
+		},
+	})
+	defer server.Close()
+
+	// Add expectation for GET /secure
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/secure").
+		AndRespondWithString("ok", 200),
+	)
+	// Make request
+	resp, err := server.mTLSClient([]tls.Certificate{clientCert}, serverCertPool).Get(server.URL() + "/secure")
+	if err != nil {
+		t.Fatalf("unexpected error during mTLS request: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+// 1. Normal HTTPS with trusted self-signed server cert
+func TestHTTPSWithSelfSignedServerCert(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: false,
+		},
+	})
+	defer server.Close()
+
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/secure").
+		AndRespondWithString("ok", 200),
+	)
+
+	// Build RootCAs to trust server cert
+	certData, _ := os.ReadFile("testdata/server.crt")
+	rootCAs := x509.NewCertPool()
+	rootCAs.AppendCertsFromPEM(certData)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: rootCAs},
+		},
+	}
+
+	resp, err := client.Get(server.URL() + "/secure")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+// HTTPS with invalid/untrusted server certificate
+func TestHTTPSWithInvalidServerCert(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: false,
+		},
+	})
+	defer server.Close()
+
+	client := &http.Client{} // Default client does not trust the self-signed cert
+	_, err := client.Get(server.URL() + "/secure")
+	if err == nil {
+		t.Fatal("expected TLS handshake error for untrusted server cert, got nil")
+	}
+}
+
+// mTLS: server requires client cert, client does not provide one
+func TestMutualTLSNoClientCert(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	clientCertData, _ := os.ReadFile("testdata/client.crt")
+	clientCertPool := x509.NewCertPool()
+	clientCertPool.AppendCertsFromPEM(clientCertData)
+
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: true,
+			ClientCAs:         clientCertPool,
+		},
+	})
+	defer server.Close()
+
+	client := &http.Client{} // client does not provide a certificate
+	_, err := client.Get(server.URL() + "/secure")
+	if err == nil {
+		t.Fatal("expected TLS handshake error due to missing client certificate, got nil")
+	}
+}
+
+// mTLS: client provides invalid certificate
+func TestMutualTLSWithInvalidClientCert(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: true,
+			ClientCAs:         x509.NewCertPool(), // empty pool, server trusts nothing
+		},
+	})
+	defer server.Close()
+
+	clientCert, _ := tls.LoadX509KeyPair("testdata/client.crt", "testdata/client.key")
+	certData, _ := os.ReadFile("testdata/server.crt")
+	rootCAs := x509.NewCertPool()
+	rootCAs.AppendCertsFromPEM(certData)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      rootCAs,
+			},
+		},
+	}
+
+	_, err := client.Get(server.URL() + "/secure")
+	if err == nil {
+		t.Fatal("expected TLS handshake error due to server rejecting client certificate, got nil")
+	}
+}
+
+// TestTLSVersionEnforcement ensures the server enforces minimum TLS version.
+// Server requires TLS >= 1.2, client tries TLS 1.0 and fails handshake.
+func TestTLSVersionEnforcement(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates: []tls.Certificate{serverCert},
+			MinVersion:   tls.VersionTLS12,
+		},
+	})
+	defer server.Close()
+
+	// Client tries TLS 1.0
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion:         tls.VersionTLS10, // explicitly old TLS
+				MaxVersion:         tls.VersionTLS10,
+				InsecureSkipVerify: true, // skip cert check for this test
+			},
+		},
+	}
+
+	_, err := client.Get(server.URL() + "/secure")
+	if err == nil {
+		t.Fatal("expected handshake failure due to old TLS version, got nil")
+	}
+}
+
+// TestMultipleClientsConcurrentRequests tests server concurrency with multiple clients.
+// Mix of valid and invalid clients are used simultaneously.
+func TestMultipleClientsConcurrentRequests(t *testing.T) {
+	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: false,
+		},
+		UnmatchedStatusCode:    http.StatusTeapot,
+		UnmatchedStatusMessage: "Unmatched Request",
+		LogUnmatched:           true,
+	})
+	defer server.Close()
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/secure").
+		AndRespondWithString("ok", 200),
+	)
+	certData, _ := os.ReadFile("testdata/server.crt")
+	rootCAs := x509.NewCertPool()
+	rootCAs.AppendCertsFromPEM(certData)
+	const numClients = 5
+	var wg sync.WaitGroup
+	wg.Add(numClients)
+	errorsCh := make(chan error, numClients)
+	for i := 0; i < numClients; i++ {
+		go func(i int) {
+			defer wg.Done()
+			client := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs: rootCAs,
+					},
+				},
+			}
+			// Every even index client sends invalid path
+			url := server.URL() + "/secure"
+			if i%2 == 0 {
+				url = server.URL() + "/invalid"
+			}
+			resp, err := client.Get(url)
+			if err != nil {
+				errorsCh <- err
+				return
+			}
+			defer safeClose(t, resp.Body)
+			if i%2 == 0 && resp.StatusCode != http.StatusTeapot {
+				errorsCh <- fmt.Errorf("expected %d for invalid path, got %d", http.StatusTeapot, resp.StatusCode)
+			}
+			if i%2 != 0 && resp.StatusCode != 200 {
+				errorsCh <- fmt.Errorf("expected 200 for valid path, got %d", resp.StatusCode)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errorsCh)
+	for err := range errorsCh {
+		t.Error(err)
+	}
+}
+
+// TestHTTPSWithTrustedAndUntrustedClients tests mTLS enforcement.
+// - Server requires client certificate signed by trusted CA
+// - One client presents a trusted cert (should succeed)
+// - One client presents an untrusted cert (should fail handshake)
+func TestHTTPSWithTrustedAndUntrustedClients(t *testing.T) {
+	// Load server certificate + key
+	serverCrtPath := "testdata/server.crt"
+	serverKeyPath := "testdata/server.key"
+	serverCert, err := tls.LoadX509KeyPair(serverCrtPath, serverKeyPath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Load trusted client certificate + key
+	trustedClientCrt := "testdata/client.crt"
+	trustedClientKey := "testdata/client.key"
+	trustedCert, err := tls.LoadX509KeyPair(trustedClientCrt, trustedClientKey)
+	if err != nil {
+		t.Fatalf("failed to load trusted client cert/key: %v", err)
+	}
+
+	// Load untrusted client certificate + key
+	untrustedClientCrt := "testdata/untrusted_client.crt"
+	untrustedClientKey := "testdata/untrusted_client.key"
+	untrustedCert, err := tls.LoadX509KeyPair(untrustedClientCrt, untrustedClientKey)
+	if err != nil {
+		t.Fatalf("failed to load untrusted client cert/key: %v", err)
+	}
+
+	// Server trust pool (trusts only trusted client)
+	trustedClientData, _ := os.ReadFile(trustedClientCrt)
+	clientCertPool := x509.NewCertPool()
+	if ok := clientCertPool.AppendCertsFromPEM(trustedClientData); !ok {
+		t.Fatal("failed to append trusted client cert to server trust pool")
+	}
+
+	// Configure mock server to require client certs (mTLS)
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: true,
+			ClientCAs:         clientCertPool,
+		},
+	})
+	defer server.Close()
+
+	// Add expectation for GET /secure
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/secure").
+		AndRespondWithString("ok", 200),
+	)
+
+	// Server cert pool for clients to trust server
+	serverCertData, _ := os.ReadFile(serverCrtPath)
+	serverCertPool := x509.NewCertPool()
+	if ok := serverCertPool.AppendCertsFromPEM(serverCertData); !ok {
+		t.Fatal("failed to append server cert to client trust pool")
+	}
+
+	type testClient struct {
+		cert     tls.Certificate
+		name     string
+		expectOK bool
+	}
+
+	clients := []testClient{
+		{cert: trustedCert, name: "trusted", expectOK: true},
+		{cert: untrustedCert, name: "untrusted", expectOK: false},
+	}
+
+	var wg sync.WaitGroup
+	errorsCh := make(chan string, len(clients))
+	wg.Add(len(clients))
+
+	for _, tc := range clients {
+		go func(tc testClient) {
+			defer wg.Done()
+			client := server.mTLSClient([]tls.Certificate{tc.cert}, serverCertPool)
+			resp, err := client.Get(server.URL() + "/secure")
+			if tc.expectOK {
+				if err != nil {
+					errorsCh <- fmt.Sprintf("%s client failed: %v", tc.name, err)
+					return
+				}
+				defer safeClose(t, resp.Body)
+				if resp.StatusCode != 200 {
+					errorsCh <- fmt.Sprintf("%s client got status %d, expected 200", tc.name, resp.StatusCode)
+				}
+			} else {
+				if err == nil {
+					errorsCh <- fmt.Sprintf("%s client succeeded but should have failed", tc.name)
+				}
+			}
+		}(tc)
+	}
+
+	wg.Wait()
+	close(errorsCh)
+
+	for err := range errorsCh {
+		t.Error(err)
+	}
+}
+
+// TestHTTPSWithMultipleExpectations verifies mock server handles multiple expectations over HTTPS.
+func TestHTTPSWithMultipleExpectations(t *testing.T) {
+	// Load server certificate + key
+	serverCrtPath := "testdata/server.crt"
+	serverKeyPath := "testdata/server.key"
+	serverCert, err := tls.LoadX509KeyPair(serverCrtPath, serverKeyPath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Configure HTTPS mock server (no client certs for simplicity)
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: false,
+		},
+		UnmatchedStatusCode:    http.StatusNotFound,
+		UnmatchedStatusMessage: "No matching expectation",
+	})
+	defer server.Close()
+
+	// Add multiple expectations
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/get").
+		AndRespondWithString("get_ok", 200),
+	)
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/post").
+		AndRespondWithString("post_ok", 201),
+	)
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("DELETE").
+		WithPath("/delete").
+		AndRespondWithString("delete_ok", 204),
+	)
+
+	// Server trust pool for client to verify server
+	serverCertData, _ := os.ReadFile(serverCrtPath)
+	serverCertPool := x509.NewCertPool()
+	if ok := serverCertPool.AppendCertsFromPEM(serverCertData); !ok {
+		t.Fatal("failed to append server cert to client trust pool")
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: serverCertPool,
+			},
+		},
+	}
+
+	// Test GET expectation
+	resp, err := client.Get(server.URL() + "/get")
+	if err != nil {
+		t.Fatalf("GET /get failed: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /get: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Test POST expectation
+	postResp, err := client.Post(server.URL()+"/post", "text/plain", nil)
+	if err != nil {
+		t.Fatalf("POST /post failed: %v", err)
+	}
+	defer safeClose(t, postResp.Body)
+	if postResp.StatusCode != 201 {
+		t.Fatalf("POST /post: expected 201, got %d", postResp.StatusCode)
+	}
+
+	// Test DELETE expectation
+	req, _ := http.NewRequest("DELETE", server.URL()+"/delete", nil)
+	deleteResp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /delete failed: %v", err)
+	}
+	defer safeClose(t, deleteResp.Body)
+	if deleteResp.StatusCode != 204 {
+		t.Fatalf("DELETE /delete: expected 204, got %d", deleteResp.StatusCode)
+	}
+
+	// Test unmatched path returns configured status
+	unmatchedResp, err := client.Get(server.URL() + "/unknown")
+	if err != nil {
+		t.Fatalf("GET /unknown failed: %v", err)
+	}
+	defer safeClose(t, unmatchedResp.Body)
+	if unmatchedResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /unknown: expected %d, got %d", http.StatusNotFound, unmatchedResp.StatusCode)
+	}
+}
+
+// TestHTTPSWithMultipleExpectationsAndMutualTLS verifies mock server handles multiple expectations over HTTPS with mTLS.
+//   - Server requires client certificates
+//   - Multiple expectations are registered for different paths and methods
+//   - Client presents its certificate and trusts the server certificate
+func TestHTTPSWithMultipleExpectationsAndMutualTLS(t *testing.T) {
+	// Load server certificate + key
+	serverCrtPath := "testdata/server.crt"
+	serverKeyPath := "testdata/server.key"
+	serverCert, err := tls.LoadX509KeyPair(serverCrtPath, serverKeyPath)
+	if err != nil {
+		t.Fatalf("failed to load server cert/key: %v", err)
+	}
+
+	// Load client certificate + key
+	clientCrtPath := "testdata/client.crt"
+	clientKeyPath := "testdata/client.key"
+	clientCert, err := tls.LoadX509KeyPair(clientCrtPath, clientKeyPath)
+	if err != nil {
+		t.Fatalf("failed to load client cert/key: %v", err)
+	}
+
+	// Server trust pool (trust client certificate)
+	clientCertData, err := os.ReadFile(clientCrtPath)
+	if err != nil {
+		t.Fatalf("failed to read client cert: %v", err)
+	}
+	clientCertPool := x509.NewCertPool()
+	if ok := clientCertPool.AppendCertsFromPEM(clientCertData); !ok {
+		t.Fatal("failed to append client cert to server trust pool")
+	}
+
+	// Server configuration: require client cert (mTLS)
+	server := NewMockServerWithConfig(Config{
+		Protocol: HTTPS,
+		TLSConfig: &TLSOptions{
+			Certificates:      []tls.Certificate{serverCert},
+			RequireClientCert: true,
+			ClientCAs:         clientCertPool,
+		},
+		UnmatchedStatusCode:    http.StatusTeapot,
+		UnmatchedStatusMessage: "Unmatched Request",
+		LogUnmatched:           true,
+	})
+	defer server.Close()
+
+	// Add multiple expectations
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/get").
+		AndRespondWithString("get_ok", 200),
+	)
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("POST").
+		WithPath("/post").
+		AndRespondWithString("post_ok", 201),
+	)
+	server.AddExpectation(NewExpectation().
+		WithRequestMethod("DELETE").
+		WithPath("/delete").
+		AndRespondWithString("delete_ok", 204),
+	)
+
+	// Client trust pool (trust server certificate)
+	serverCertData, err := os.ReadFile(serverCrtPath)
+	if err != nil {
+		t.Fatalf("failed to read server cert: %v", err)
+	}
+	serverCertPool := x509.NewCertPool()
+	if ok := serverCertPool.AppendCertsFromPEM(serverCertData); !ok {
+		t.Fatal("failed to append server cert to client trust pool")
+	}
+
+	// Create mutual TLS client
+	mtlsClient := server.mTLSClient([]tls.Certificate{clientCert}, serverCertPool)
+
+	// Test GET expectation
+	resp, err := mtlsClient.Get(server.URL() + "/get")
+	if err != nil {
+		t.Fatalf("GET /get failed: %v", err)
+	}
+	defer safeClose(t, resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /get: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Test POST expectation
+	postResp, err := mtlsClient.Post(server.URL()+"/post", "text/plain", nil)
+	if err != nil {
+		t.Fatalf("POST /post failed: %v", err)
+	}
+	defer safeClose(t, postResp.Body)
+	if postResp.StatusCode != 201 {
+		t.Fatalf("POST /post: expected 201, got %d", postResp.StatusCode)
+	}
+
+	// Test DELETE expectation
+	req, _ := http.NewRequest("DELETE", server.URL()+"/delete", nil)
+	deleteResp, err := mtlsClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /delete failed: %v", err)
+	}
+	defer safeClose(t, deleteResp.Body)
+	if deleteResp.StatusCode != 204 {
+		t.Fatalf("DELETE /delete: expected 204, got %d", deleteResp.StatusCode)
+	}
+
+	// Test unmatched path returns configured status
+	unmatchedResp, err := mtlsClient.Get(server.URL() + "/unknown")
+	if err != nil {
+		t.Fatalf("GET /unknown failed: %v", err)
+	}
+	defer safeClose(t, unmatchedResp.Body)
+	if unmatchedResp.StatusCode != http.StatusTeapot {
+		t.Fatalf("GET /unknown: expected %d, got %d", http.StatusTeapot, unmatchedResp.StatusCode)
 	}
 }
