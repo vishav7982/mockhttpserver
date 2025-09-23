@@ -114,7 +114,7 @@ func TestWithRequestBodyFromFileAndRespondFromFile(t *testing.T) {
 		t.Fatalf("response file missing: %v", err)
 	}
 
-	ms := NewMockServerWithConfig(Config{
+	ms := NewMockServerWithConfig(&Config{
 		UnmatchedStatusCode: 404,
 	})
 	defer ms.Close()

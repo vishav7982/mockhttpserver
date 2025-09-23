@@ -13,8 +13,8 @@ import (
 )
 
 // DefaultConfig returns the default configuration.
-func DefaultConfig() Config {
-	return Config{
+func DefaultConfig() *Config {
+	return &Config{
 		Protocol:               HTTP,
 		UnmatchedStatusCode:    http.StatusTeapot,
 		UnmatchedStatusMessage: "Unmatched Request",
@@ -30,10 +30,10 @@ func NewMockServer() *MockServer {
 }
 
 // NewMockServerWithConfig initializes a new MockServer with custom configuration.
-func NewMockServerWithConfig(config Config) *MockServer {
+func NewMockServerWithConfig(config *Config) *MockServer {
 	ms := &MockServer{
 		logger: log.New(os.Stdout, "[MockServer] ", log.LstdFlags|log.Lshortfile),
-		config: config,
+		config: *config,
 	}
 
 	if config.Protocol == HTTPS {

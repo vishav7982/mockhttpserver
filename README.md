@@ -1,10 +1,12 @@
-# mockhttpserver
+# moxy
 
-A **lightweight and flexible HTTP mock server for Go** — built on `httptest.Server` to make client testing simple.
-# mockhttpserver
+A blazing-fast, zero-config **HTTP/HTTPS** & **mTLS** mock server for Go — built on **httptest.Server**, designed for realistic, reproducible, and secure integration tests.
+Stop fighting with Docker containers, flaky network calls, and manual certificate generation. With **moxy**, you can spin up a fully functional mock server (HTTP or HTTPS) in seconds, define expectations with a clean DSL, and test client behavior under real-world scenarios — including mutual TLS, sequential responses, delays, and timeouts — without leaving memory.
 
-![Go CI](https://github.com/vishav7982/mockhttpserver/actions/workflows/mockhttpserver-ci.yml/badge.svg?branch=main)
-[![Coverage](https://codecov.io/gh/vishav7982/mockhttpserver/branch/main/graph/badge.svg)](https://codecov.io/gh/vishav7982/mockhttpserver)
+✅ Perfect for **CI/CD** pipelines, **retry logic** testing, **OAuth** flows, and **secure service-to-service** communication tests
+
+![Go CI](https://github.com/vishav7982/moxy/actions/workflows/moxy-ci.yml/badge.svg?branch=main)
+[![Coverage](https://codecov.io/gh/vishav7982/moxy/branch/main/graph/badge.svg)](https://codecov.io/gh/vishav7982/moxy)
 ---
 
 ## Features
@@ -16,20 +18,22 @@ A **lightweight and flexible HTTP mock server for Go** — built on `httptest.Se
 - MaxCalls enforcement and unmatched request tracking.
 - Thread-safe with call count tracking.
 - Middleware support and verbose logging.
+- HTTPS support with self-signed or custom certificates.
+- Mutual TLS (mTLS) support for client certificate verification.
 ---
 
 ## Install
 
 ```bash
-go get github.com/vishav7982/mockhttpserver
+go get github.com/vishav7982/moxy
 ```
 
 ## Quick Start
 ```Go
-ms := mockhttpserver.NewMockServer()
+ms := moxy.NewMockServer()
 defer ms.Close()
 
-exp := mockhttpserver.NewExpectation().
+exp := moxy.NewExpectation().
         WithRequestMethod("GET").
         WithPath("/ping").
         AndRespondWithString(`{"message":"pong"}`, 200)
@@ -40,123 +44,123 @@ body, _ := io.ReadAll(resp.Body)
 
 fmt.Println(string(body)) // {"message":"pong"}
 ```
-### Minimal Integration Example 
-Here’s a **minimal, end-to-end** example to get you started quickly:
+📖 For more extensive usage examples — including https, mTLS, headers, query parameters, sequential responses, response delays, simulated server timeouts, custom responders, unmatched request handling etc. — see [mock_server_test.go](./mock_server_test.go).
+## Why Use It ?
+Modern Go projects need reliable integration tests — but setting up real HTTP(S) servers, TLS, and mTLS is painful and slow. This library solves that by giving you an in-memory, production-like HTTP/HTTPS server that is:
+
+**✅ 1. Zero-Config HTTPS & mTLS**
+
+Automatically generates self-signed certs for you. Supports mutual TLS (mTLS) out of the box — no need to write OpenSSL scripts or manage temp cert files manually. Lets you easily test trusted vs. untrusted client behavior in the same test suite.
+
+**✅ 2. Fast, In-Memory, No External Dependencies**
+
+No need to spin up Docker containers or mock services manually. No network flakiness — runs entirely in-memory, so tests are deterministic and blazing fast.
+
+**✅ 3. Rich Expectation DSL**
+
+Define request matchers with method, path, headers, query params, and body content. Supports multiple expectations for different endpoints.
+Supports sequential responses for the same request (great for retry and polling tests).
+
+**✅ 4. Customizable Client & TLS Behavior**
+
+Easily create preconfigured http.Clients that trust your mock server. Can toggle between strict verification and InsecureSkipVerify for quick-and-dirty testing.
+
+**✅ 5. Safe, Concurrency-Friendly**
+
+Designed for parallel tests — no global state, no race conditions. Thread-safe expectation matching and request recording.
+
+**✅ 6. Clear Failure Reporting**
+
+When expectations don’t match, you get detailed logs showing the unexpected request and which expectation failed. Makes debugging test failures much faster.
+
+**✅ 7. Minimal Boilerplate**
+A few lines of code start a server, add expectations, and return responses. No need to manage ports manually — it binds to a free port automatically.
+
+**✅ 8. Supports Realistic Workflows**
+
+Perfect for testing OAuth flows, login endpoints, webhook receivers, or any HTTPS integration.
+
+## ❓ Frequently Asked Questions
+
+**1. Can I use this mock server for both HTTP and HTTPS?**
+
+Yes, you can configure the protocol by passing Config{Protocol: HTTPS/HTTP} when creating the server. Default is HTTP. If you don’t provide TLS certificates, a self-signed certificate will be generated automatically.
+
+**2. Can I define multiple expectations for different paths?**
+
+Absolutely.
+You can add multiple expectations before making requests:
 ```go
-package main
+server.AddExpectation(NewExpectation().
+WithRequestMethod("GET").
+WithPath("/ping").
+AndRespondWithString("pong", 200))
 
-import (
-   "bytes"
-   "fmt"
-   "io"
-   "log"
-   "net/http"
-
-   "github.com/vishav7982/mockhttpserver"
-)
-
-func main() {
-   ms := mockhttpserver.NewMockServer()
-   defer ms.Close()
-
-   // GET /ping
-   getExp := mockhttpserver.
-      NewExpectation().
-      WithRequestMethod("GET").
-      WithPath("/ping").
-      AndRespondWithString(`{"message":"pong"}`, 200)
-   ms.AddExpectation(getExp)
-
-   resp, err := http.Get(ms.URL() + "/ping")
-   if err != nil {
-      log.Fatal(err)
-   }
-   body, err := io.ReadAll(resp.Body)
-   resp.Body.Close() // close immediately
-   if err != nil {
-      log.Fatal(err)
-   }
-   fmt.Println("GET /ping:", resp.StatusCode, string(body))
-
-   // POST /login
-   postExp := mockhttpserver.
-      NewExpectation().
-      WithRequestMethod("POST").
-      WithPath("/login").
-      WithRequestBodyString(`{"username":"alice","password":"secret"}`).
-      AndRespondWithString(`{"token":"abc123","expires":3600}`, 200)
-   ms.AddExpectation(postExp)
-
-   reqBody := []byte(`{"username":"alice","password":"secret"}`)
-   resp, err = http.Post(ms.URL()+"/login", "application/json", bytes.NewReader(reqBody))
-   if err != nil {
-      log.Fatal(err)
-   }
-   body, err = io.ReadAll(resp.Body)
-   resp.Body.Close() // close immediately
-   if err != nil {
-      log.Fatal(err)
-   }
-   fmt.Println("POST /login:", resp.StatusCode, string(body))
-}
+server.AddExpectation(NewExpectation().
+WithRequestMethod("POST").
+WithPath("/login").
+AndRespondWithString("ok", 200))
 ```
 
-**🔁 Sequential Responses**
+**3. Does it support sequential responses for the same endpoint?**
 
-Sometimes, you need to simulate **different responses for the same request** across multiple calls. This is useful for testing **stateful APIs**, **polling behavior**, or **retry logic**.
-
-Use **`NextResponse()`** to define multiple responses for a single expectation. Each call to `NextResponse()` starts a **new response object** for the same expectation.
+Yes!
+You can use .NextResponse() to define multiple sequential responses for the same request:
 ```go
 e := NewExpectation().
 WithRequestMethod("GET").
-WithPath("/multi-seq").
-WithResponseHeader("X-Step", "1").
-AndRespondWithString(`{"step":"one"}`, 200).
-NextResponse(). // Starts a new response; subsequent methods apply to newly created response.
-WithResponseHeader("X-Step", "2").
-AndRespondWithString(`{"step":"two"}`, 201).
-NextResponse(). // Starts a new response; subsequent methods apply to newly created response.
-WithResponseHeader("X-Step", "3").
-AndRespondWithString(`{"step":"three"}`, 202)
-ms.AddExpectation(e)
+WithPath("/status").
+AndRespondWithString("step 1", 200).
+NextResponse().
+AndRespondWithString("step 2", 200)
+
+server.AddExpectation(e)
+
+// 1st call → "step 1"
+// 2nd call → "step 2"
 ```
-**When this is registered with the mock server**
-- 1st request → returns {"step":"one"} with status 200 and header X-Step: 1
-- 2nd request → returns {"step":"two"} with status 201 and header X-Step: 2
-- 3rd request → returns {"step":"three"} with status 202 and header X-Step: 3
-- Any further requests → repeat the last response (step three)
 
-That’s it — define an expectation, add it to the server, and make requests against it.
+Perfect for testing polling or retry behavior.
 
-**🕒 Combining with Delays and Timeouts**
+**4. How do unmatched requests behave?**
 
-You can mix **NextResponse()** with **.WithResponseDelay()** and **.SimulateTimeout()** to simulate real-world behavior — like **slow servers** or **hung requests** — and the mock server will return responses **in the exact order you defined them** sequentially. Each request will receive the next response in sequence, respecting any delay or timeout you set.
+By default, unmatched requests are logged and return HTTP 418 Unmatched Request.
+You can override this behavior using Config.UnmatchedStatusCode and Config.UnmatchedStatusMessage.
+
+**5, Can I modify server behavior?**
+ 
+Absolutely! moxy exposes a rich **Config** struct that lets you customize the server at creation time — including protocol (HTTP/HTTPS), TLS settings, logging, and even the default behavior for unmatched requests.
+
+Example using custom HTTPS + mTLS:
 
 ```go
-e := NewExpectation().
-    WithRequestMethod("GET").
-    WithPath("/polling-test").
-    AndRespondWithString("initial", 200).
-    NextResponse().
-    WithResponseDelay(100 * time.Millisecond). // simulate slow second response
-    AndRespondWithString("processing", 200).
-    NextResponse().
-    SimulateTimeout() // simulate a hung request on 3rd call
+cert, _ := tls.LoadX509KeyPair("server.crt", "server.key")
+clientCAs := x509.NewCertPool()
+// Add your CA to the pool
+clientCAs.AppendCertsFromPEM(caCertPEM)
 
-ms.AddExpectation(e)
+cfg := mockhttpserver.Config{
+Protocol: mockhttpserver.HTTPS,
+TLSConfig: &mockhttpserver.TLSOptions{
+Certificates:      []tls.Certificate{cert},
+RequireClientCert: true,
+ClientCAs:         clientCAs,
+MinVersion:        tls.VersionTLS12,
+},
+UnmatchedStatusCode:    404,
+UnmatchedStatusMessage: "Route Not Found",
+VerboseLogging:         true,
+}
+ms := mockhttpserver.NewMockServerWithConfig(cfg)
+defer ms.Close()
 ```
-**This setup will behave as follows:**
-- First request → Immediate response "initial".
-- Second request → Delayed 100 ms before returning "processing".
-- Third request → Simulates a server that never replies (client should hit timeout).
 
-📖 For more extensive usage examples — including headers, query parameters, sequential responses, response delays, simulated server timeouts, custom responders, unmatched request handling etc. — see [mock_server_test.go](./mock_server_test.go).
-## Why Use It ?
-- Eliminate flaky network calls in tests
-- Verify client code sends requests correctly
-- Reproducible, isolated tests for CI/CD pipelines
+This way, you can:
+- Use your own certs or let the server auto-generate a self-signed one
+- Turn on mutual TLS (RequireClientCert)
+- Control logging and unmatched request responses 
+- Easily toggle between HTTP and HTTPS
 
-# Contributing
 ## Contributing
 
 Contributions are welcome! 🎉 See [CONTRIBUTION.md](./CONTRIBUTING.md) for more details.

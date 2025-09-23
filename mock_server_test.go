@@ -112,7 +112,7 @@ func TestMockServer_CustomConfig(t *testing.T) {
 		VerboseLogging:      true,
 	}
 
-	ms := NewMockServerWithConfig(config)
+	ms := NewMockServerWithConfig(&config)
 	defer ms.Close()
 
 	resp, err := http.Get(ms.URL() + "/unknown")
@@ -581,7 +581,7 @@ func TestMockServer_ExpectationManagement(t *testing.T) {
 
 // TestMockServer_UnmatchedRequests tests tracking of unmatched requests.
 func TestMockServer_UnmatchedRequest(t *testing.T) {
-	ms := NewMockServerWithConfig(Config{
+	ms := NewMockServerWithConfig(&Config{
 		UnmatchedStatusCode: 404,
 	})
 	defer ms.Close()
@@ -638,7 +638,7 @@ func TestMockServer_MaxBodySize(t *testing.T) {
 		MaxBodySize: 10,
 	}
 
-	ms := NewMockServerWithConfig(config)
+	ms := NewMockServerWithConfig(&config)
 	defer ms.Close()
 
 	largeBody := strings.Repeat("x", 100)
@@ -876,7 +876,7 @@ func TestExpectation_MalformedJSONRequest(t *testing.T) {
 
 // TestMockServer_MaxBodySizeExceeded ensures that requests exceeding MaxBodySize return 400 Bad Request.
 func TestMockServer_MaxBodySizeExceeded(t *testing.T) {
-	ms := NewMockServerWithConfig(Config{MaxBodySize: 5})
+	ms := NewMockServerWithConfig(&Config{MaxBodySize: 5})
 	defer ms.Close()
 
 	resp, _ := http.Post(ms.URL()+"/test", "text/plain", strings.NewReader("exceeds"))
@@ -955,7 +955,7 @@ func TestMockServer_NilBodyRequest(t *testing.T) {
 
 // TestMockServer_GetUnmatchedRequests ensures unmatched requests are recorded and returned correctly.
 func TestMockServer_GetUnmatchedRequests(t *testing.T) {
-	ms := NewMockServerWithConfig(Config{UnmatchedStatusCode: 404})
+	ms := NewMockServerWithConfig(&Config{UnmatchedStatusCode: 404})
 	defer ms.Close()
 
 	// Trigger two unmatched requests
@@ -1395,7 +1395,7 @@ func TestHTTPSWithDefaultClient(t *testing.T) {
 	}
 
 	// Configure mock server with TLSOptions (HTTPS)
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{cert},
@@ -1447,7 +1447,7 @@ func TestHTTPSWithCustomClient(t *testing.T) {
 	}
 
 	// Configure mock server with TLSOptions
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{cert},
@@ -1524,7 +1524,7 @@ func TestHTTPSWithMutualTLS(t *testing.T) {
 		t.Fatal("failed to append server cert to client trust pool")
 	}
 	// Configure mock server to require client cert (mTLS)
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1555,7 +1555,7 @@ func TestHTTPSWithMutualTLS(t *testing.T) {
 // 1. Normal HTTPS with trusted self-signed server cert
 func TestHTTPSWithSelfSignedServerCert(t *testing.T) {
 	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1594,7 +1594,7 @@ func TestHTTPSWithSelfSignedServerCert(t *testing.T) {
 // HTTPS with invalid/untrusted server certificate
 func TestHTTPSWithInvalidServerCert(t *testing.T) {
 	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1617,7 +1617,7 @@ func TestMutualTLSNoClientCert(t *testing.T) {
 	clientCertPool := x509.NewCertPool()
 	clientCertPool.AppendCertsFromPEM(clientCertData)
 
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1637,7 +1637,7 @@ func TestMutualTLSNoClientCert(t *testing.T) {
 // mTLS: client provides invalid certificate
 func TestMutualTLSWithInvalidClientCert(t *testing.T) {
 	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1671,7 +1671,7 @@ func TestMutualTLSWithInvalidClientCert(t *testing.T) {
 // Server requires TLS >= 1.2, client tries TLS 1.0 and fails handshake.
 func TestTLSVersionEnforcement(t *testing.T) {
 	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates: []tls.Certificate{serverCert},
@@ -1701,7 +1701,7 @@ func TestTLSVersionEnforcement(t *testing.T) {
 // Mix of valid and invalid clients are used simultaneously.
 func TestMultipleClientsConcurrentRequests(t *testing.T) {
 	serverCert, _ := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1798,7 +1798,7 @@ func TestHTTPSWithTrustedAndUntrustedClients(t *testing.T) {
 	}
 
 	// Configure mock server to require client certs (mTLS)
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1878,7 +1878,7 @@ func TestHTTPSWithMultipleExpectations(t *testing.T) {
 	}
 
 	// Configure HTTPS mock server (no client certs for simplicity)
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
@@ -1995,7 +1995,7 @@ func TestHTTPSWithMultipleExpectationsAndMutualTLS(t *testing.T) {
 	}
 
 	// Server configuration: require client cert (mTLS)
-	server := NewMockServerWithConfig(Config{
+	server := NewMockServerWithConfig(&Config{
 		Protocol: HTTPS,
 		TLSConfig: &TLSOptions{
 			Certificates:      []tls.Certificate{serverCert},
