@@ -74,6 +74,7 @@ Designed for parallel tests — no global state, no race conditions. Thread-safe
 When expectations don’t match, you get detailed logs showing the unexpected request and which expectation failed. Makes debugging test failures much faster.
 
 **✅ 7. Minimal Boilerplate**
+
 A few lines of code start a server, add expectations, and return responses. No need to manage ports manually — it binds to a free port automatically.
 
 **✅ 8. Supports Realistic Workflows**
@@ -171,6 +172,7 @@ See [USAGE.md](./USAGE.md) for a complete guide on using **moxy**, including:
 ## Contributing
 
 Contributions are welcome! 🎉 See [CONTRIBUTION.md](./CONTRIBUTING.md) for more details.
+
 
 
 
