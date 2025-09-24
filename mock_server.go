@@ -63,9 +63,6 @@ func NewMockServerWithConfig(customConfig *Config) *MockServer {
 	} else {
 		ms.server = httptest.NewServer(http.HandlerFunc(ms.handler))
 	}
-	if config.UnmatchedStatusCode != http.StatusTeapot {
-
-	}
 	return ms
 }
 
