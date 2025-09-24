@@ -24,13 +24,32 @@ func DefaultConfig() *Config {
 	}
 }
 
+// mergeWithDefaults fills missing fields in custom config with defaults.
+func mergeWithDefaults(custom *Config) *Config {
+	if custom == nil {
+		return DefaultConfig()
+	}
+	def := DefaultConfig()
+	if custom.UnmatchedStatusCode == 0 {
+		custom.UnmatchedStatusCode = def.UnmatchedStatusCode
+	}
+	if custom.UnmatchedStatusMessage == "" {
+		custom.UnmatchedStatusMessage = def.UnmatchedStatusMessage
+	}
+	if custom.MaxBodySize == 0 {
+		custom.MaxBodySize = def.MaxBodySize
+	}
+	return custom
+}
+
 // NewMockServer initializes a new MockServer with default configuration and logger.
 func NewMockServer() *MockServer {
 	return NewMockServerWithConfig(DefaultConfig())
 }
 
 // NewMockServerWithConfig initializes a new MockServer with custom configuration.
-func NewMockServerWithConfig(config *Config) *MockServer {
+func NewMockServerWithConfig(customConfig *Config) *MockServer {
+	config := mergeWithDefaults(customConfig)
 	ms := &MockServer{
 		logger: log.New(os.Stdout, "[MockServer] ", log.LstdFlags|log.Lshortfile),
 		config: *config,
@@ -43,6 +62,9 @@ func NewMockServerWithConfig(config *Config) *MockServer {
 		ms.server = server
 	} else {
 		ms.server = httptest.NewServer(http.HandlerFunc(ms.handler))
+	}
+	if config.UnmatchedStatusCode != http.StatusTeapot {
+
 	}
 	return ms
 }

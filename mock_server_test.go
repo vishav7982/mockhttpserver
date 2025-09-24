@@ -1707,9 +1707,7 @@ func TestMultipleClientsConcurrentRequests(t *testing.T) {
 			Certificates:      []tls.Certificate{serverCert},
 			RequireClientCert: false,
 		},
-		UnmatchedStatusCode:    http.StatusTeapot,
-		UnmatchedStatusMessage: "Unmatched Request",
-		LogUnmatched:           true,
+		LogUnmatched: true,
 	})
 	defer server.Close()
 	server.AddExpectation(NewExpectation().
