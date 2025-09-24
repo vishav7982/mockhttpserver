@@ -161,6 +161,13 @@ This way, you can:
 - Control logging and unmatched request responses 
 - Easily toggle between HTTP and HTTPS
 
+## Usage
+
+See [USAGE.md](./USAGE.md) for a complete guide on using **moxy**, including:
+- Mocking HTTP/HTTPS requests
+- Simulating timeouts and delays
+- Sequential responses and advanced expectations etc.
+
 ## Contributing
 
 Contributions are welcome! 🎉 See [CONTRIBUTION.md](./CONTRIBUTING.md) for more details.
