@@ -415,6 +415,52 @@ func TestMockServer_ResponseHeaders(t *testing.T) {
 	}
 }
 
+// TestExpectationAssertions verifies that the built-in assertion helpers
+// AssertCalled and AssertNotCalled correctly track the number of times
+// each mock expectation is invoked. It ensures deterministic verification
+// of mock server interactions, including expectations that are called
+// once and those that are never called.
+func TestExpectationAssertions(t *testing.T) {
+	ms := NewMockServer()
+	defer ms.Close()
+
+	// Expectation
+	exp := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/users/42").
+		AndRespondWithString(`{"id":42,"name":"Alice"}`, 200)
+	ms.AddExpectation(exp)
+
+	// Call the mock server once
+	resp, err := http.Get(ms.URL() + "/users/42")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			t.Fatalf("error in closing response body: %v", err)
+		}
+	}(resp.Body)
+
+	// Assert called once
+	if err := exp.AssertCalled(1); err != nil {
+		t.Error(err)
+	}
+
+	// Add another expectation that is never called
+	exp2 := NewExpectation().
+		WithRequestMethod("GET").
+		WithPath("/users/0").
+		AndRespondWithString(`{"id":0}`, 200)
+	ms.AddExpectation(exp2)
+
+	// Assert not called
+	if err := exp2.AssertNotCalled(); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestMockServer_MultipleResponsesWithHeaders verifies that multiple responses
 // with their own headers and bodies are returned in sequence.
 func TestMockServer_MultipleResponsesWithHeaders(t *testing.T) {

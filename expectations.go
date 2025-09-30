@@ -399,3 +399,19 @@ func containsAll(actual, expected map[string]interface{}) bool {
 	}
 	return true
 }
+
+// AssertCalled checks if the expectation was called exactly `expected` times.
+func (e *Expectation) AssertCalled(expected int) error {
+	if e.InvocationCount != expected {
+		return fmt.Errorf(
+			"expectation for %s %s: expected %d calls, got %d",
+			e.Request.Method, e.Request.Path, expected, e.InvocationCount,
+		)
+	}
+	return nil
+}
+
+// AssertNotCalled checks if the expectation was never called.
+func (e *Expectation) AssertNotCalled() error {
+	return e.AssertCalled(0)
+}
